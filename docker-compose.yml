@@ -1,0 +1,9 @@
+services:
+  cometbft:
+    image: cometbft/cometbft:v0.38.26
+    command: ["node", "--proxy_app=tcp://host.docker.internal:26658"]
+    ports:
+      - "26656:26656"
+      - "26657:26657"
+    volumes:
+      - ./cometbft-data:/cometbft

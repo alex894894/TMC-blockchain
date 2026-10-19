@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+env/
+venv/
+.venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# CometBFT private keys and runtime state
+cometbft-data/config/priv_validator_key.json
+cometbft-data/config/node_key.json
+cometbft-data/config/addrbook.json
+cometbft-data/config/write-file-atomic-*
+cometbft-data/data/
