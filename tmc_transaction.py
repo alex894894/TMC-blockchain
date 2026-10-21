@@ -218,3 +218,71 @@ def apply_signed_transfer(storage, transaction):
         amount_minor=transaction["amount_minor"],
         nonce=transaction["nonce"],
     )
+
+
+def encode_transaction(transaction):
+    """Convert a transaction dictionary into canonical JSON bytes."""
+    if not isinstance(transaction, dict):
+        raise ValueError("Transaction must be a dictionary")
+
+    return canonical_json(transaction)
+
+
+def decode_transaction(raw):
+    """Decode and validate the canonical transaction representation."""
+    if not isinstance(raw, bytes):
+        raise ValueError("Transaction data must be bytes")
+
+    if not raw or len(raw) > 16_384:
+        raise ValueError("Invalid transaction size")
+
+    try:
+        transaction = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("Invalid transaction JSON") from None
+
+    if not isinstance(transaction, dict):
+        raise ValueError("Transaction must be a JSON object")
+
+    # Require one canonical byte representation for each transaction.
+    if encode_transaction(transaction) != raw:
+        raise ValueError("Transaction JSON is not canonical")
+
+    if not verify_transaction(transaction):
+        raise ValueError("Invalid transaction signature")
+
+    return transaction
+
+
+def apply_block_transactions(storage, transactions):
+    """Validate and atomically apply a block's transfers."""
+    if not isinstance(transactions, list):
+        raise ValueError("Transactions must be a list")
+
+    transfers = []
+
+    # Validate every signature before changing account balances.
+    for transaction in transactions:
+        if not verify_transaction(transaction):
+            raise ValueError("Invalid transaction signature")
+
+        sender_account = storage.get_account(
+            transaction["sender"]
+        )
+
+        if sender_account is None:
+            raise ValueError("Sender account does not exist")
+
+        if sender_account["public_key"] != transaction["public_key"]:
+            raise ValueError(
+                "Public key is not registered to sender"
+            )
+
+        transfers.append({
+            "sender": transaction["sender"],
+            "recipient": transaction["recipient"],
+            "amount_minor": transaction["amount_minor"],
+            "nonce": transaction["nonce"],
+        })
+
+    return storage.transfer_batch(transfers)

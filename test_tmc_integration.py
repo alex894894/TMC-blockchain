@@ -7,10 +7,10 @@ from tmc_transaction import (
     generate_keypair,
     create_signed_transaction,
     apply_signed_transfer,
+    apply_block_transactions,
 )
 
-
-class TestTMCIntegration(unittest.TestCase):
+class TestTMCIntegration(unittest.TestCase):    
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         db_path = Path(self.temp_dir.name) / "test_tmc.db"
@@ -109,7 +109,75 @@ class TestTMCIntegration(unittest.TestCase):
             )
 
         bob = self.storage.get_account(self.bob_address)
+        self.assertEqual(bob["balance_minor"], 5000) 
+
+    def test_block_transfers_succeed_atomically(self):
+        tx1 = create_signed_transaction(
+            self.alice_private_key,
+            self.bob_address,
+            2000,
+            1,
+        )
+
+        tx2 = create_signed_transaction(
+            self.bob_private_key,
+            self.alice_address,
+            1000,
+            1,
+        )
+
+        results = apply_block_transactions(
+            self.storage,
+            [tx1, tx2],
+        )
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(
+            self.storage.get_account(
+                self.alice_address
+            )["balance_minor"],
+            9000,
+        )
+        self.assertEqual(
+            self.storage.get_account(
+                self.bob_address
+            )["balance_minor"],
+            6000,
+        )
+
+    def test_block_rolls_back_if_later_transfer_fails(self):
+        tx1 = create_signed_transaction(
+            self.alice_private_key,
+            self.bob_address,
+            2000,
+            1,
+        )
+
+        # Alice has 10,000 minor units, so this transfer
+        # cannot succeed after the first transfer.
+        tx2 = create_signed_transaction(
+            self.alice_private_key,
+            self.bob_address,
+            9000,
+            2,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Insufficient balance",
+        ):
+            apply_block_transactions(
+                self.storage,
+                [tx1, tx2],
+            )
+
+        alice = self.storage.get_account(self.alice_address)
+        bob = self.storage.get_account(self.bob_address)
+
+        # Neither transfer should remain applied.
+        self.assertEqual(alice["balance_minor"], 10000)
         self.assertEqual(bob["balance_minor"], 5000)
+        self.assertEqual(alice["nonce"], 0)
 
 
 if __name__ == "__main__":

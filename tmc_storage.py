@@ -42,6 +42,22 @@ class TMCStorage:
                     public_key TEXT
                 )
             """)
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS chain_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    height INTEGER NOT NULL DEFAULT 0,
+                    app_hash TEXT NOT NULL DEFAULT ''
+                )
+            """)
+
+            connection.execute("""
+                INSERT OR IGNORE INTO chain_state (
+                    id,
+                    height,
+                    app_hash
+                )
+                VALUES (1, 0, '')
+            """)
 
             # Check the existing database schema.
             columns = {
@@ -230,3 +246,161 @@ class TMCStorage:
             "nonce": nonce,
             "status": "success",
         }
+    
+    
+    def transfer_batch(self, transfers):
+        """Apply multiple transfers in one SQLite transaction."""
+        if not isinstance(transfers, list):
+            raise ValueError("Transfers must be a list")
+
+        results = []
+
+        with self.connect() as connection:
+            for transfer in transfers:
+                sender = transfer["sender"]
+                recipient = transfer["recipient"]
+                amount = transfer["amount_minor"]
+                nonce = transfer["nonce"]
+
+                if not isinstance(sender, str) or not sender.strip():
+                    raise ValueError("Sender address must not be empty")
+
+                if not isinstance(recipient, str) or not recipient.strip():
+                    raise ValueError("Recipient address must not be empty")
+
+                if sender == recipient:
+                    raise ValueError("Cannot transfer to the same account")
+
+                if type(amount) is not int or amount <= 0:
+                    raise ValueError("Amount must be a positive integer")
+
+                if type(nonce) is not int or nonce <= 0:
+                    raise ValueError("Nonce must be a positive integer")
+
+                sender_account = connection.execute(
+                    """
+                    SELECT balance_minor, nonce
+                    FROM accounts
+                    WHERE address = ?
+                    """,
+                    (sender,),
+                ).fetchone()
+
+                recipient_account = connection.execute(
+                    """
+                    SELECT balance_minor
+                    FROM accounts
+                    WHERE address = ?
+                    """,
+                    (recipient,),
+                ).fetchone()
+
+                if sender_account is None:
+                    raise ValueError("Sender account does not exist")
+
+                if recipient_account is None:
+                    raise ValueError("Recipient account does not exist")
+
+                if nonce != sender_account["nonce"] + 1:
+                    raise ValueError("Invalid nonce")
+
+                if sender_account["balance_minor"] < amount:
+                    raise ValueError("Insufficient balance")
+
+                connection.execute(
+                    """
+                    UPDATE accounts
+                    SET balance_minor = balance_minor - ?,
+                        nonce = ?
+                    WHERE address = ?
+                    """,
+                    (amount, nonce, sender),
+                )
+
+                connection.execute(
+                    """
+                    UPDATE accounts
+                    SET balance_minor = balance_minor + ?
+                    WHERE address = ?
+                    """,
+                    (amount, recipient),
+                )
+
+                results.append({
+                    "sender": sender,
+                    "recipient": recipient,
+                    "amount_minor": amount,
+                    "nonce": nonce,
+                    "status": "success",
+                })
+
+        return results
+
+    def get_all_accounts(self):
+        with self.connect() as connection:
+            rows = connection.execute("""
+                SELECT
+                    address,
+                    balance_minor,
+                    nonce,
+                    public_key
+                FROM accounts
+                ORDER BY address
+            """).fetchall()
+
+        return {
+            row["address"]: dict(row)
+            for row in rows
+        }
+
+    def get_chain_state(self):
+        with self.connect() as connection:
+            row = connection.execute("""
+                SELECT height, app_hash
+                FROM chain_state
+                WHERE id = 1
+            """).fetchone()
+
+        return {
+            "height": row["height"],
+            "app_hash": row["app_hash"],
+        }
+
+    def save_committed_state(
+        self,
+        accounts,
+        height,
+        app_hash,
+    ):
+        if type(height) is not int or height < 0:
+            raise ValueError("Blok beýikligi nädogry.")
+
+        if not isinstance(app_hash, str):
+            raise ValueError("Blok hash-y nädogry.")
+
+        with self.connect() as connection:
+            connection.execute("DELETE FROM accounts")
+
+            connection.executemany("""
+                INSERT INTO accounts (
+                    address,
+                    balance_minor,
+                    nonce,
+                    public_key
+                )
+                VALUES (?, ?, ?, ?)
+            """, [
+                (
+                    address,
+                    account["balance_minor"],
+                    account["nonce"],
+                    account["public_key"],
+                )
+                for address, account in sorted(accounts.items())
+            ])
+
+            connection.execute("""
+                UPDATE chain_state
+                SET height = ?, app_hash = ?
+                WHERE id = 1
+            """, (height, app_hash))
