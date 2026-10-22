@@ -1,4 +1,4 @@
-
+import copy
 import hashlib
 import json
 import logging
@@ -240,11 +240,40 @@ class TMCApp(
             log="Talap ýoly goldanylmaýar.",
         )
 
+   
+    
     async def prepare_proposal(
         self, req: RequestPrepareProposal
     ) -> ResponsePrepareProposal:
-        # Häzir teklip edilen tranzaksiýalaryň tertibini üýtgetmeýäris
-        return ResponsePrepareProposal(txs=req.txs)
+        # Teklip üçin hasaplaryň wagtlaýyn ýagdaýyny almak
+        accounts = self.storage.get_all_accounts()
+        selected_txs = []
+        total_bytes = 0
+        max_bytes = max(0, req.max_tx_bytes)
+
+        for raw_tx in req.txs:
+            tx_size = len(raw_tx)
+
+            # Ölçeg çäginden geçýän tranzaksiýany geçirmek
+            if total_bytes + tx_size > max_bytes:
+                continue
+
+            # Tranzaksiýany aýratyn wagtlaýyn ýagdaýda barlamak
+            candidate_accounts = copy.deepcopy(accounts)
+
+            try:
+                self._apply_transaction(candidate_accounts, raw_tx)
+            except (ValueError, TypeError, KeyError, OverflowError):
+                # Nädogry tranzaksiýany teklibe goşmazlyk
+                continue
+
+            # Diňe dogry tranzaksiýany we onuň ýagdaýyny kabul etmek
+            selected_txs.append(raw_tx)
+            total_bytes += tx_size
+            accounts = candidate_accounts
+
+        return ResponsePrepareProposal(txs=selected_txs)
+
 
     async def process_proposal(
         self, req: RequestProcessProposal
@@ -276,34 +305,42 @@ class TMCApp(
             status=VerifyStatus.ACCEPT
         )
 
+   
     async def finalize_block(
         self, req: RequestFinalizeBlock
     ) -> ResponseFinalizeBlock:
-        # Öňki tassyklanan ýagdaýdan wagtlaýyn nusga almak
+        # Tassyklanan ýagdaýdan wagtlaýyn nusga almak
         accounts = self.storage.get_all_accounts()
         results = []
 
-        # Tranzaksiýalary blokdaky tertibi boýunça ýerine ýetirmek
-        for raw_tx in req.txs:
-            try:
+        # Ähli tranzaksiýalary wagtlaýyn ýagdaýda barlamak
+        try:
+            for raw_tx in req.txs:
                 self._apply_transaction(accounts, raw_tx)
 
-                results.append(
-                    ExecTxResult(
-                        code=0,
-                        log="Tranzaksiýa üstünlikli ýerine ýetirildi.",
-                    )
-                )
+        except (ValueError, TypeError, KeyError, OverflowError):
+            # Bir tranzaksiýa ýalňyş bolsa, ähli blok üýtgewsiz galýar
+            accounts = self.storage.get_all_accounts()
 
-            except (ValueError, TypeError, KeyError, OverflowError):
-                results.append(
-                    ExecTxResult(
-                        code=1,
-                        log="Tranzaksiýa ýerine ýetirilmedi.",
-                    )
+            results = [
+                ExecTxResult(
+                    code=1,
+                    log="Blokdaky tranzaksiýalar kabul edilmedi.",
                 )
+                for _ in req.txs
+            ]
 
-        # Diňe wagtlaýyn ýagdaýyň hash bahasyny hasaplamak
+        else:
+            # Ähli tranzaksiýalar üstünlikli ýerine ýetirildi
+            results = [
+                ExecTxResult(
+                    code=0,
+                    log="Tranzaksiýa üstünlikli ýerine ýetirildi.",
+                )
+                for _ in req.txs
+            ]
+
+        # Wagtlaýyn ýagdaýyň hash bahasyny hasaplamak
         new_hash = self._state_hash(accounts)
 
         self.pending_height = req.height
@@ -314,6 +351,7 @@ class TMCApp(
             tx_results=results,
             app_hash=new_hash,
         )
+
 
     async def commit(self, req: RequestCommit) -> ResponseCommit:
         # Tassyklanan ýagdaýy maglumatlar bazasyna bilelikde ýazmak

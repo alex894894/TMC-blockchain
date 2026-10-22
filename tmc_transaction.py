@@ -160,6 +160,13 @@ def verify_transaction(transaction):
         if len(signature_bytes) != 64:
             return False
 
+        # Açaryň we goluň hexadecimal görnüşini barlamak.
+        if transaction["public_key"] != public_key_bytes.hex():
+            return False
+
+        if transaction["signature"] != signature_bytes.hex():
+            return False
+
         expected_sender = address_from_public_key(public_key_bytes)
 
         if transaction["sender"] != expected_sender:

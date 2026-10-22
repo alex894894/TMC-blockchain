@@ -69,7 +69,38 @@ class TestTMCTransaction(unittest.TestCase):
                 0,
                 1,
             )
+    def test_public_key_with_spaces_is_rejected(self):
+        transaction = create_signed_transaction(
+            self.private_key,
+            "tmc_test_recipient",
+            100,
+            1,
+        )
 
+        transaction["public_key"] = (
+            transaction["public_key"][:2]
+            + " "
+            + transaction["public_key"][2:]
+        )
+
+        self.assertFalse(verify_transaction(transaction))
+
+
+    def test_signature_with_spaces_is_rejected(self):
+        transaction = create_signed_transaction(
+            self.private_key,
+            "tmc_test_recipient",
+            100,
+            1,
+        )
+
+        transaction["signature"] = (
+            transaction["signature"][:2]
+            + " "
+            + transaction["signature"][2:]
+        )
+
+        self.assertFalse(verify_transaction(transaction))
 
 if __name__ == "__main__":
     unittest.main()
