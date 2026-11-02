@@ -1,3 +1,4 @@
 pure-protobuf==3.1.5
 pyABCI==0.1.0
 typing_extensions==4.16.0
+cryptography==50.0.2
