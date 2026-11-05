@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
+from tmc_constants import MAX_INTEGER
 
 DOMAIN = b"TMC-TRANSACTION-V1\x00"
 
@@ -71,11 +72,11 @@ def create_signed_transaction(
     if not isinstance(recipient, str) or not recipient.strip():
         raise ValueError("Recipient must not be empty")
 
-    if type(amount_minor) is not int or amount_minor <= 0:
-        raise ValueError("Amount must be a positive integer")
+    if type(amount_minor) is not int or not 0 < amount_minor <= MAX_INTEGER:
+        raise ValueError("Töleg möçberi nädogry.")
 
-    if type(nonce) is not int or nonce <= 0:
-        raise ValueError("Nonce must be a positive integer")
+    if type(nonce) is not int or not 0 < nonce <= MAX_INTEGER:
+        raise ValueError("Nonce bahasy nädogry.")
 
     public_key = private_key.public_key().public_bytes(
         encoding=serialization.Encoding.Raw,
@@ -136,13 +137,13 @@ def verify_transaction(transaction):
         if type(transaction["amount_minor"]) is not int:
             return False
 
-        if transaction["amount_minor"] <= 0:
+        if not 0 < transaction["amount_minor"] <= MAX_INTEGER:
             return False
 
         if type(transaction["nonce"]) is not int:
             return False
 
-        if transaction["nonce"] <= 0:
+        if not 0 < transaction["nonce"] <= MAX_INTEGER:
             return False
 
         if not isinstance(transaction["public_key"], str):

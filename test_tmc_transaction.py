@@ -3,12 +3,12 @@ import copy
 import unittest
 
 from tmc_transaction import (
+    MAX_INTEGER,
     create_signed_transaction,
     generate_keypair,
     transaction_id,
     verify_transaction,
 )
-
 
 class TestTMCTransaction(unittest.TestCase):
     def setUp(self):
@@ -69,6 +69,35 @@ class TestTMCTransaction(unittest.TestCase):
                 0,
                 1,
             )
+
+    def test_max_integer_amount_is_accepted(self):
+        transaction = create_signed_transaction(
+            self.private_key,
+            "tmc_bob",
+            MAX_INTEGER,
+            1,
+        )
+
+        self.assertTrue(verify_transaction(transaction))
+
+    def test_amount_above_max_integer_cannot_be_signed(self):
+        with self.assertRaises(ValueError):
+            create_signed_transaction(
+                self.private_key,
+                "tmc_bob",
+                MAX_INTEGER + 1,
+                1,
+            )
+
+    def test_nonce_above_max_integer_cannot_be_signed(self):
+        with self.assertRaises(ValueError):
+            create_signed_transaction(
+                self.private_key,
+                "tmc_bob",
+                100,
+                MAX_INTEGER + 1,
+            )
+            
     def test_public_key_with_spaces_is_rejected(self):
         transaction = create_signed_transaction(
             self.private_key,

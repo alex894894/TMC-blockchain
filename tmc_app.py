@@ -47,6 +47,7 @@ from abci.types import (
 from tmc_storage import TMCStorage
 from tmc_transaction import decode_transaction
 
+from tmc_constants import MAX_INTEGER
 
 class TMCApp(
     abc.Application,
@@ -144,6 +145,10 @@ class TMCApp(
         if sender["balance_minor"] < amount:
             raise ValueError("Hasapda serişdeler ýeterlik däl.")
 
+        # Alyjynyň balansynyň çäkden geçmeýändigini barlamak
+        if recipient["balance_minor"] > MAX_INTEGER - amount:
+            raise ValueError("Alyjynyň balansy rugsat edilen çäkden geçýär.")
+
         # Üýtgeşmeler diňe wagtlaýyn ýagdaýda ýerine ýetirilýär
         sender["balance_minor"] -= amount
         sender["nonce"] = tx["nonce"]
@@ -160,9 +165,40 @@ class TMCApp(
     async def init_chain(
         self, req: RequestInitChain
     ) -> ResponseInitChain:
-        # Başlangyç ýagdaýyň hash bahasyny hasaplamak
+
+        # Häzirki blok ýagdaýyny almak
+        chain_state = self.storage.get_chain_state()
+
+        # Blok beýikligi bar bolsa, öň döredilen zynjyry ulanmak
+        if chain_state["height"] > 0:
+            if not chain_state["app_hash"]:
+                raise ValueError("Blok hash-y tapylmady.")
+
+            self.height = chain_state["height"]
+            self.app_hash = bytes.fromhex(chain_state["app_hash"])
+
+            return ResponseInitChain(app_hash=self.app_hash)
+
+        # Öň başlangyç hash ýazylan bolsa, ony gaýtadan ulanmak
+        if chain_state["app_hash"]:
+            self.app_hash = bytes.fromhex(chain_state["app_hash"])
+
+            return ResponseInitChain(app_hash=self.app_hash)
+
+        # Başlangyç hasaplaryň ýagdaýyny almak
         accounts = self.storage.get_all_accounts()
+
+        # Genesis ýagdaýynyň hash bahasyny hasaplamak
         self.app_hash = self._state_hash(accounts)
+
+        # Başlangyç ýagdaýy maglumatlar bazasyna ýazmak
+        self.storage.save_committed_state(
+            accounts=accounts,
+            height=0,
+            app_hash=self.app_hash.hex(),
+        )
+
+        self.height = 0
 
         return ResponseInitChain(app_hash=self.app_hash)
 

@@ -8,6 +8,7 @@ from abci.types import (
     RequestProcessProposal,
     RequestCommit,
     ProposalStatus,
+    RequestInitChain,
     RequestPrepareProposal,
 )
 from abci.proto.tendermint.abci.types import CommitInfo
@@ -22,6 +23,7 @@ from tmc_transaction import (
 )
 from abci.types import RequestCheckTx
 
+from tmc_constants import MAX_INTEGER
 
 class TestTMCApp(unittest.IsolatedAsyncioTestCase):
 
@@ -472,7 +474,81 @@ class TestTMCApp(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             self.app._apply_transaction(accounts, raw_tx)
 
+    def test_apply_transaction_rejects_recipient_balance_overflow(self):
+        # Alyjynyň balansyny iň ýokary çäge ýakynlaşdyrmak
+        accounts = self.storage.get_all_accounts()
+        accounts[self.recipient]["balance_minor"] = MAX_INTEGER - 50
 
+        # Balansyň çäkden geçmegine sebäp bolýan tranzaksiýa
+        tx = create_signed_transaction(
+            self.sender_private_key,
+            self.recipient,
+            amount_minor=100,
+            nonce=1,
+        )
 
+        raw_tx = encode_transaction(tx)
+
+        # Tranzaksiýanyň ret edilmelidigini barlamak
+        with self.assertRaises(ValueError):
+            self.app._apply_transaction(accounts, raw_tx)
+
+        # Ýalňyşlykdan soň iberijiniň balansynyň üýtgemändigini barlamak
+        self.assertEqual(accounts[self.sender]["balance_minor"], 1000)
+
+        # Alyjynyň balansynyň hem üýtgemändigini barlamak
+        self.assertEqual(
+            accounts[self.recipient]["balance_minor"],
+            MAX_INTEGER - 50,
+        )
+    async def test_init_chain_saves_genesis_state(self):
+        response = await self.app.init_chain(
+            RequestInitChain(
+                time=Timestamp(seconds=0, nanos=0),
+                chain_id="tmc-test",
+                consensus_params=None,
+                validators=[],
+            )
+        )
+
+        chain_state = self.storage.get_chain_state()
+        expected_hash = self.app._state_hash(
+            self.storage.get_all_accounts()
+        )
+
+        self.assertEqual(response.app_hash, expected_hash)
+        self.assertEqual(chain_state["height"], 0)
+        self.assertEqual(chain_state["app_hash"], expected_hash.hex())
+
+        self.assertEqual(self.app.height, 0)
+        self.assertEqual(self.app.app_hash, expected_hash)
+
+    async def test_init_chain_does_not_overwrite_existing_state(self):
+        existing_accounts = self.storage.get_all_accounts()
+        existing_hash = self.app._state_hash(existing_accounts).hex()
+
+        self.storage.save_committed_state(
+            accounts=existing_accounts,
+            height=0,
+            app_hash=existing_hash,
+        )
+
+        # Bar bolan ýagdaýyň hash bahasyny ýatda saklamak
+        saved_hash = self.storage.get_chain_state()["app_hash"]
+
+        response = await self.app.init_chain(
+            RequestInitChain(
+                time=Timestamp(seconds=0, nanos=0),
+                chain_id="tmc-test",
+                consensus_params=None,
+                validators=[],
+            )
+        )
+
+        self.assertEqual(response.app_hash.hex(), saved_hash)
+        self.assertEqual(
+            self.storage.get_chain_state()["app_hash"],
+            saved_hash,
+        )
 if __name__ == "__main__":
     unittest.main()

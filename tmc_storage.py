@@ -3,7 +3,7 @@ import hashlib
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-
+from tmc_constants import MAX_INTEGER
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_DIR / "data"
@@ -106,10 +106,11 @@ class TMCStorage:
         if not isinstance(address, str) or not address.strip():
             raise ValueError("Address must not be empty")
 
-        if type(balance_minor) is not int or balance_minor < 0:
-            raise ValueError(
-                "Balance must be a non-negative integer"
-            )
+        if type(balance_minor) is not int:
+            raise ValueError("Balance must be an integer")
+
+        if not 0 <= balance_minor <= MAX_INTEGER:
+            raise ValueError("Balance is outside the allowed range")
 
         if public_key is not None:
             if not isinstance(public_key, str):
@@ -183,12 +184,17 @@ class TMCStorage:
         if sender == recipient:
             raise ValueError("Cannot transfer to the same account")
 
-        if type(amount_minor) is not int or amount_minor <= 0:
-            raise ValueError("Amount must be a positive integer")
+        if type(amount_minor) is not int:
+            raise ValueError("Töleg möçberi bitewi san bolmaly.")
 
-        if type(nonce) is not int or nonce <= 0:
-            raise ValueError("Nonce must be a positive integer")
+        if not 0 < amount_minor <= MAX_INTEGER:
+            raise ValueError("Töleg möçberi rugsat edilen çäkden çykýar.")
 
+        if type(nonce) is not int:
+            raise ValueError("Nonce bitewi san bolmaly.")
+
+        if not 0 < nonce <= MAX_INTEGER:
+            raise ValueError("Nonce rugsat edilen çäkden çykýar.")
         with self.connect() as connection:
             sender_account = connection.execute(
                 """
@@ -214,8 +220,14 @@ class TMCStorage:
             if recipient_account is None:
                 raise ValueError("Recipient account does not exist")
 
+            if sender_account["nonce"] >= MAX_INTEGER:
+                raise ValueError("Sender nonce has reached the maximum value")
+
             if nonce != sender_account["nonce"] + 1:
                 raise ValueError("Invalid nonce")
+
+            if recipient_account["balance_minor"] > MAX_INTEGER - amount_minor:
+                raise ValueError("Recipient balance would exceed the maximum value")            
 
             if sender_account["balance_minor"] < amount_minor:
                 raise ValueError("Insufficient balance")
@@ -257,11 +269,26 @@ class TMCStorage:
 
         with self.connect() as connection:
             for transfer in transfers:
+
+                if not isinstance(transfer, dict):
+                    raise ValueError("Invalid transfer format")
+
+                required_fields = {
+                    "sender",
+                    "recipient",
+                    "amount_minor",
+                    "nonce",
+                }
+
+                if not required_fields.issubset(transfer):
+                    raise ValueError("Transfer fields are missing")
+
                 sender = transfer["sender"]
                 recipient = transfer["recipient"]
                 amount = transfer["amount_minor"]
                 nonce = transfer["nonce"]
 
+                # Salgylar dogry bolmaly.
                 if not isinstance(sender, str) or not sender.strip():
                     raise ValueError("Sender address must not be empty")
 
@@ -271,11 +298,18 @@ class TMCStorage:
                 if sender == recipient:
                     raise ValueError("Cannot transfer to the same account")
 
-                if type(amount) is not int or amount <= 0:
-                    raise ValueError("Amount must be a positive integer")
+                # Töleg möçberi we nonce çäklerini barlamak.
+                if type(amount) is not int:
+                    raise ValueError("Töleg möçberi bitewi san bolmaly.")
 
-                if type(nonce) is not int or nonce <= 0:
-                    raise ValueError("Nonce must be a positive integer")
+                if not 0 < amount <= MAX_INTEGER:
+                    raise ValueError("Töleg möçberi rugsat edilen çäkden çykýar.")
+
+                if type(nonce) is not int:
+                    raise ValueError("Nonce bitewi san bolmaly.")
+
+                if not 0 < nonce <= MAX_INTEGER:
+                    raise ValueError("Nonce rugsat edilen çäkden çykýar.")
 
                 sender_account = connection.execute(
                     """
@@ -295,18 +329,31 @@ class TMCStorage:
                     (recipient,),
                 ).fetchone()
 
+                # Hasaplaryň bardygyny barlamak.
                 if sender_account is None:
                     raise ValueError("Sender account does not exist")
 
                 if recipient_account is None:
                     raise ValueError("Recipient account does not exist")
 
+                # Nonce çägini we yzygiderliligini barlamak.
+                if sender_account["nonce"] >= MAX_INTEGER:
+                    raise ValueError("Sender nonce has reached the maximum value")
+
                 if nonce != sender_account["nonce"] + 1:
                     raise ValueError("Invalid nonce")
 
+                # Iberijiniň balansyny barlamak.
                 if sender_account["balance_minor"] < amount:
                     raise ValueError("Insufficient balance")
 
+                # Alyjynyň balansynyň artmagyny barlamak.
+                if recipient_account["balance_minor"] > MAX_INTEGER - amount:
+                    raise ValueError(
+                        "Recipient balance would exceed the maximum value"
+                    )
+
+                # Iberijiniň balansyny we nonce bahasyny täzelemek.
                 connection.execute(
                     """
                     UPDATE accounts
@@ -317,6 +364,7 @@ class TMCStorage:
                     (amount, nonce, sender),
                 )
 
+                # Alyjynyň balansyny täzelemek.
                 connection.execute(
                     """
                     UPDATE accounts
@@ -372,12 +420,52 @@ class TMCStorage:
         height,
         app_hash,
     ):
-        if type(height) is not int or height < 0:
+        # Blok beýikligini barlamak.
+        if type(height) is not int:
             raise ValueError("Blok beýikligi nädogry.")
+
+        if not 0 <= height <= MAX_INTEGER:
+            raise ValueError("Blok beýikligi rugsat edilen çäkden çykýar.")
 
         if not isinstance(app_hash, str):
             raise ValueError("Blok hash-y nädogry.")
 
+        if not isinstance(accounts, dict):
+            raise ValueError("Hasap maglumatlary nädogry.")
+
+        # Ähli hasaplary maglumatlar bazasyna ýazmazdan öň barlamak.
+        for address, account in accounts.items():
+
+            if not isinstance(address, str) or not address.strip():
+                raise ValueError("Hasap salgysy nädogry.")
+
+            if not isinstance(account, dict):
+                raise ValueError("Hasap maglumatlary nädogry.")
+
+            if "balance_minor" not in account or "nonce" not in account:
+                raise ValueError("Hasap maglumatlary doly däl.")
+
+            balance = account["balance_minor"]
+            nonce = account["nonce"]
+
+            if type(balance) is not int:
+                raise ValueError("Balans bitewi san bolmaly.")
+
+            if not 0 <= balance <= MAX_INTEGER:
+                raise ValueError("Balans rugsat edilen çäkden çykýar.")
+
+            if type(nonce) is not int:
+                raise ValueError("Nonce bitewi san bolmaly.")
+
+            if not 0 <= nonce <= MAX_INTEGER:
+                raise ValueError("Nonce rugsat edilen çäkden çykýar.")
+
+            public_key = account.get("public_key")
+
+            if public_key is not None and not isinstance(public_key, str):
+                raise ValueError("Public key nädogry.")
+
+        # Ähli barlaglar üstünlikli geçenden soň maglumatlary ýazmak.
         with self.connect() as connection:
             connection.execute("DELETE FROM accounts")
 
@@ -394,7 +482,7 @@ class TMCStorage:
                     address,
                     account["balance_minor"],
                     account["nonce"],
-                    account["public_key"],
+                    account.get("public_key"),
                 )
                 for address, account in sorted(accounts.items())
             ])
