@@ -181,10 +181,10 @@ class TMCApp(
 
         # Öň başlangyç hash ýazylan bolsa, ony gaýtadan ulanmak
         if chain_state["app_hash"]:
+            self.height = chain_state["height"]
             self.app_hash = bytes.fromhex(chain_state["app_hash"])
 
             return ResponseInitChain(app_hash=self.app_hash)
-
         # Başlangyç hasaplaryň ýagdaýyny almak
         accounts = self.storage.get_all_accounts()
 
@@ -345,8 +345,14 @@ class TMCApp(
     async def finalize_block(
         self, req: RequestFinalizeBlock
     ) -> ResponseFinalizeBlock:
+
         # Tassyklanan ýagdaýdan wagtlaýyn nusga almak
         accounts = self.storage.get_all_accounts()
+
+        # Blok beýikligini barlamak
+        if req.height != self.height + 1:
+            raise ValueError("Blok beýikligi nädogry.")
+
         results = []
 
         # Ähli tranzaksiýalary wagtlaýyn ýagdaýda barlamak
@@ -355,7 +361,6 @@ class TMCApp(
                 self._apply_transaction(accounts, raw_tx)
 
         except (ValueError, TypeError, KeyError, OverflowError):
-            # Bir tranzaksiýa ýalňyş bolsa, ähli blok üýtgewsiz galýar
             accounts = self.storage.get_all_accounts()
 
             results = [
@@ -367,7 +372,6 @@ class TMCApp(
             ]
 
         else:
-            # Ähli tranzaksiýalar üstünlikli ýerine ýetirildi
             results = [
                 ExecTxResult(
                     code=0,
@@ -376,7 +380,6 @@ class TMCApp(
                 for _ in req.txs
             ]
 
-        # Wagtlaýyn ýagdaýyň hash bahasyny hasaplamak
         new_hash = self._state_hash(accounts)
 
         self.pending_height = req.height
@@ -387,7 +390,6 @@ class TMCApp(
             tx_results=results,
             app_hash=new_hash,
         )
-
 
     async def commit(self, req: RequestCommit) -> ResponseCommit:
         # Tassyklanan ýagdaýy maglumatlar bazasyna bilelikde ýazmak

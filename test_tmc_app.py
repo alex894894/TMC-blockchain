@@ -150,6 +150,13 @@ class TestTMCApp(unittest.IsolatedAsyncioTestCase):
             restarted_storage.get_account(self.sender)["balance_minor"],
             900,
         )
+        
+        restored_sender = restarted_storage.get_account(self.sender)
+        restored_recipient = restarted_storage.get_account(self.recipient)
+
+        self.assertEqual(restored_sender["balance_minor"], 900)
+        self.assertEqual(restored_sender["nonce"], 1)
+        self.assertEqual(restored_recipient["balance_minor"], 100)
 
     async def test_invalid_transaction_does_not_change_balances(self):
         tx = create_signed_transaction(
