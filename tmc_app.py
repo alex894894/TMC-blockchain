@@ -70,7 +70,34 @@ class TMCApp(
         self.height = saved_state["height"]
 
         saved_hash = saved_state["app_hash"]
-        self.app_hash = bytes.fromhex(saved_hash) if saved_hash else b""
+        # Saklanan hash-y barlamak
+        if saved_hash:
+            try:
+                stored_hash = bytes.fromhex(saved_hash)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Maglumatlar bazasyndaky blok hash-y nädogry."
+                ) from exc
+
+            # Hasaplaryň häzirki ýagdaýynyň hash-yny hasaplamak
+            accounts = self.storage.get_all_accounts()
+            calculated_hash = self._state_hash(accounts)
+
+            # Saklanan hash bilen hasaplanan hash-y deňeşdirmek
+            if calculated_hash != stored_hash:
+                raise ValueError(
+                    "Maglumatlar bazasyndaky ýagdaý hash-y bilen gabat gelmeýär."
+                )
+
+            self.app_hash = stored_hash
+
+        else:
+            if self.height > 0:
+                raise ValueError(
+                    "Blok beýikligi bar, ýöne blok hash-y ýok."
+                )
+
+            self.app_hash = b""
 
         # Tassyklanmadyk blok üçin wagtlaýyn maglumatlar
         self.pending_height = None

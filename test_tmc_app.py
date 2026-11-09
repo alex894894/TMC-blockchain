@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from abci.types import (
     RequestFinalizeBlock,
@@ -150,7 +151,7 @@ class TestTMCApp(unittest.IsolatedAsyncioTestCase):
             restarted_storage.get_account(self.sender)["balance_minor"],
             900,
         )
-        
+
         restored_sender = restarted_storage.get_account(self.sender)
         restored_recipient = restarted_storage.get_account(self.recipient)
 
@@ -557,5 +558,124 @@ class TestTMCApp(unittest.IsolatedAsyncioTestCase):
             self.storage.get_chain_state()["app_hash"],
             saved_hash,
         )
+    
+    async def test_restart_rejects_modified_balance(self):
+        # Dogry ýagdaýyň hash bahasyny hasaplamak
+        accounts = self.storage.get_all_accounts()
+        correct_hash = self.app._state_hash(accounts)
+
+        # Balansy üýtgetmek
+        accounts[self.sender]["balance_minor"] = 500
+
+        # Üýtgedilen ýagdaýy öňki hash bilen saklamak
+        self.storage.save_committed_state(
+            accounts=accounts,
+            height=1,
+            app_hash=correct_hash.hex(),
+        )
+
+        # Üýtgedilen ýagdaý bilen programmanyň işe başlamaly däldigini barlamak
+        with self.assertRaises(ValueError):
+            TMCApp(storage=TMCStorage(self.db_path))
+    
+    async def test_restart_rejects_invalid_app_hash(self):
+        accounts = self.storage.get_all_accounts()
+
+        self.storage.save_committed_state(
+            accounts=accounts,
+            height=1,
+            app_hash="invalid-hash",
+        )
+
+        with self.assertRaises(ValueError):
+            TMCApp(storage=TMCStorage(self.db_path))
+    
+    async def test_restart_rejects_missing_app_hash(self):
+        accounts = self.storage.get_all_accounts()
+
+        self.storage.save_committed_state(
+            accounts=accounts,
+            height=1,
+            app_hash="",
+        )
+
+        with self.assertRaises(ValueError):
+            TMCApp(storage=TMCStorage(self.db_path))
+
+
+    async def prepare_pending_block(self):
+        tx = create_signed_transaction(
+            self.sender_private_key,
+            self.recipient,
+            amount_minor=100,
+            nonce=1,
+        )
+
+        await self.app.finalize_block(
+            self.make_finalize_request(
+                height=1,
+                txs=[encode_transaction(tx)],
+            )
+        )
+    
+    async def test_commit_failure_does_not_update_app_state(self):
+        await self.prepare_pending_block()
+
+        with patch.object(
+            self.storage,
+            "save_committed_state",
+            side_effect=OSError("Database error"),
+        ):
+            with self.assertRaises(OSError):
+                await self.app.commit(RequestCommit())
+
+        self.assertEqual(self.app.height, 0)
+        self.assertEqual(self.app.app_hash, b"")
+
+
+    async def test_commit_failure_preserves_pending_state(self):
+        await self.prepare_pending_block()
+
+        pending_height = self.app.pending_height
+        pending_hash = self.app.pending_hash
+        pending_accounts = self.app.pending_accounts
+
+        with patch.object(
+            self.storage,
+            "save_committed_state",
+            side_effect=OSError("Database error"),
+        ):
+            with self.assertRaises(OSError):
+                await self.app.commit(RequestCommit())
+
+        self.assertEqual(self.app.pending_height, pending_height)
+        self.assertEqual(self.app.pending_hash, pending_hash)
+        self.assertEqual(self.app.pending_accounts, pending_accounts)
+
+
+    async def test_commit_can_retry_after_storage_failure(self):
+        await self.prepare_pending_block()
+
+        with patch.object(
+            self.storage,
+            "save_committed_state",
+            side_effect=OSError("Database error"),
+        ):
+            with self.assertRaises(OSError):
+                await self.app.commit(RequestCommit())
+
+        # Gaýtadan Commit ýerine ýetirmek
+        await self.app.commit(RequestCommit())
+
+        self.assertEqual(self.app.height, 1)
+        self.assertEqual(self.app.pending_height, None)
+        self.assertEqual(self.app.pending_hash, None)
+        self.assertEqual(self.app.pending_accounts, None)
+
+        sender = self.storage.get_account(self.sender)
+        recipient = self.storage.get_account(self.recipient)
+
+        self.assertEqual(sender["balance_minor"], 900)
+        self.assertEqual(recipient["balance_minor"], 100)
 if __name__ == "__main__":
     unittest.main()
