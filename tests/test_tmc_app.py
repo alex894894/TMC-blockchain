@@ -677,5 +677,6 @@ class TestTMCApp(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sender["balance_minor"], 900)
         self.assertEqual(recipient["balance_minor"], 100)
+
 if __name__ == "__main__":
     unittest.main()

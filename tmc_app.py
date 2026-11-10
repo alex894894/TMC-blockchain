@@ -62,16 +62,21 @@ class TMCApp(
         self._logger = logging.getLogger("tmc")
 
         # Hasaplaryň maglumatlar bazasyny taýýarlamak
-        self.storage = storage if storage is not None else TMCStorage()
-        self.storage.init_db()
+        self.storage = storage if storage is not None else TMCStorage()        
 
         # Tassyklanan ýagdaýy maglumatlar bazasyndan dikeltmek
         saved_state = self.storage.get_chain_state()
         self.height = saved_state["height"]
 
         saved_hash = saved_state["app_hash"]
-        # Saklanan hash-y barlamak
+
         if saved_hash:
+            # Saklanan blok hash-y barlamak
+            if not isinstance(saved_hash, str) or len(saved_hash) != 64:
+                raise ValueError(
+                    "Maglumatlar bazasyndaky blok hash-y nädogry."
+                )
+
             try:
                 stored_hash = bytes.fromhex(saved_hash)
             except (TypeError, ValueError) as exc:
@@ -79,11 +84,15 @@ class TMCApp(
                     "Maglumatlar bazasyndaky blok hash-y nädogry."
                 ) from exc
 
-            # Hasaplaryň häzirki ýagdaýynyň hash-yny hasaplamak
+            if len(stored_hash) != 32:
+                raise ValueError(
+                    "Maglumatlar bazasyndaky blok hash-y nädogry."
+                )
+
+            # Hasaplaryň häzirki ýagdaýyny barlamak
             accounts = self.storage.get_all_accounts()
             calculated_hash = self._state_hash(accounts)
 
-            # Saklanan hash bilen hasaplanan hash-y deňeşdirmek
             if calculated_hash != stored_hash:
                 raise ValueError(
                     "Maglumatlar bazasyndaky ýagdaý hash-y bilen gabat gelmeýär."
@@ -419,8 +428,16 @@ class TMCApp(
         )
 
     async def commit(self, req: RequestCommit) -> ResponseCommit:
-        # Tassyklanan ýagdaýy maglumatlar bazasyna bilelikde ýazmak
+        # Tassyklanan ýagdaýyň dolulygyny barlamak
         if self.pending_accounts is not None:
+
+            if (
+                self.pending_height is None
+                or self.pending_hash is None
+            ):
+                raise ValueError("Tassyklanan ýagdaý doly däl.")
+
+            # Tassyklanan ýagdaýy maglumatlar bazasyna bilelikde ýazmak
             self.storage.save_committed_state(
                 accounts=self.pending_accounts,
                 height=self.pending_height,

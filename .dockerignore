@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+
+env/
+venv/
+__pycache__/
+.pytest_cache/
+
+*.pyc
+*.log
+
+data/
+cometbft-data/

@@ -1,14 +1,18 @@
-
+import os
 import hashlib
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from tmc_constants import MAX_INTEGER
 
+
+
 PROJECT_DIR = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_DIR / "data"
-DB_PATH = DATA_DIR / "tmc.db"
 
+DB_PATH = Path(
+    os.getenv("TMC_DB_PATH", str(DATA_DIR / "tmc.db"))
+)
 
 class TMCStorage:
     def __init__(self, db_path=DB_PATH):
@@ -428,7 +432,7 @@ class TMCStorage:
             raise ValueError("Blok beýikligi rugsat edilen çäkden çykýar.")
 
         if not isinstance(app_hash, str):
-            raise ValueError("Blok hash-y nädogry.")
+            raise ValueError("Blok hash-y nädogry.")        
 
         if not isinstance(accounts, dict):
             raise ValueError("Hasap maglumatlary nädogry.")
