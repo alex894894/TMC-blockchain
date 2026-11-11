@@ -1,0 +1,170 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>TMC - My Wallet</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6fa;
+            color: #1b2430;
+            margin: 0;
+            padding: 30px;
+        }
+
+        .container {
+            max-width: 850px;
+            margin: auto;
+        }
+
+        .card {
+            background: white;
+            padding: 22px;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        h1, h2, h3 {
+            margin-top: 0;
+        }
+
+        .balance {
+            font-size: 32px;
+            font-weight: bold;
+            color: #b58b35;
+        }
+
+        .address {
+            overflow-wrap: anywhere;
+        }
+
+        .status {
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .error {
+            background: #ffe5e5;
+            color: #a00000;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .success {
+            color: #168044;
+        }
+
+        .warning {
+            color: #a56a00;
+        }
+
+        .muted {
+            color: #687386;
+        }
+
+        a {
+            color: #b58b35;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>My TMC Wallet</h1>
+
+    <p>Welcome, {{ request.user.username }}!</p>
+
+    {% if blockchain_error %}
+        <div class="error">
+            {{ blockchain_error }}
+        </div>
+    {% endif %}
+
+    <div class="card">
+        <h2>Wallet Information</h2>
+
+        <h3>Wallet Address</h3>
+        <p class="address">{{ wallet.address }}</p>
+
+        <h3>Public Key</h3>
+        <p class="address">{{ wallet.public_key }}</p>
+
+        <h3>Registration Status</h3>
+
+        <p class="status">
+            {% if wallet.registration_status == "registered" %}
+                <span class="success">Registered</span>
+
+            {% elif wallet.registration_status == "submitted" %}
+                <span class="warning">Submitted - Waiting for confirmation</span>
+
+            {% elif wallet.registration_status == "pending" %}
+                <span class="warning">Pending - Not yet registered</span>
+
+            {% elif wallet.registration_status == "failed" %}
+                <span class="error">Registration failed</span>
+
+            {% endif %}
+        </p>
+
+        {% if wallet.registration_tx_hash %}
+            <h3>Registration Transaction Hash</h3>
+            <p class="address">{{ wallet.registration_tx_hash }}</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>Wallet Balance</h2>
+
+        {% if balance is not None %}
+            <p class="balance">
+                {{ balance|floatformat:2 }} TMC
+            </p>
+        {% else %}
+            <p class="muted">
+                Wallet account has not been registered in the blockchain yet.
+            </p>
+        {% endif %}
+
+        <h3>Transaction Nonce</h3>
+        <p>{{ nonce|default:"Not available" }}</p>
+    </div>
+
+    <div class="card">
+        <h2>Network Information</h2>
+
+        {% if network %}
+            <p>
+                <strong>Latest block height:</strong>
+                {{ network.sync_info.latest_block_height|default:"Not available" }}
+            </p>
+
+            <p>
+                <strong>Node status:</strong>
+                {% if network.sync_info.catching_up %}
+                    Synchronizing
+                {% else %}
+                    Connected
+                {% endif %}
+            </p>
+        {% else %}
+            <p class="muted">
+                Network information is currently unavailable.
+            </p>
+        {% endif %}
+    </div>
+
+    <a href="{% url 'dashboard' %}">Refresh Dashboard</a>
+
+</div>
+
+</body>
+</html>
