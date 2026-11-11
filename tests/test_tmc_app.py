@@ -20,6 +20,7 @@ from tmc_storage import TMCStorage
 from tmc_transaction import (
     generate_keypair,
     create_signed_transaction,
+    create_signed_registration_transaction,
     encode_transaction,
 )
 from abci.types import RequestCheckTx
@@ -677,6 +678,106 @@ class TestTMCApp(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sender["balance_minor"], 900)
         self.assertEqual(recipient["balance_minor"], 100)
+    
+    async def test_register_account_successfully(self):
+        # Täze hasap üçin açar jübütini döretmek
+        private_key, public_key = generate_keypair()
+
+        # Hasaby hasaba alyş tranzaksiýasyny döretmek
+        tx = create_signed_registration_transaction(private_key)
+        raw_tx = encode_transaction(tx)
+
+        # Tranzaksiýanyň kabul edilýändigini barlamak
+        check_response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+        self.assertEqual(check_response.code, 0)
+
+        # Tranzaksiýany blokda ýerine ýetirmek
+        response = await self.app.finalize_block(
+            self.make_finalize_request(
+                height=1,
+                txs=[raw_tx],
+            )
+        )
+
+        self.assertEqual(response.tx_results[0].code, 0)
+
+        address = tx["address"]
+
+        # Commit edilmezden öň hasabyň bazada ýokdugyny barlamak
+        self.assertIsNone(self.storage.get_account(address))
+
+        # Bloky saklamak
+        await self.app.commit(RequestCommit())
+
+        # Hasabyň döredilendigini barlamak
+        account = self.storage.get_account(address)
+
+        self.assertIsNotNone(account)
+        self.assertEqual(account["address"], address)
+        self.assertEqual(account["balance_minor"], 0)
+        self.assertEqual(account["nonce"], 0)
+        self.assertEqual(account["public_key"], public_key.hex())
+
+    async def test_register_account_rejects_invalid_signature(self):
+        # Täze hasap üçin açar jübütini döretmek
+        private_key, _ = generate_keypair()
+
+        tx = create_signed_registration_transaction(private_key)
+
+        # Gol çekişi nädogry etmek
+        tx["signature"] = "00" * 64
+        raw_tx = encode_transaction(tx)
+
+        response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+
+        self.assertNotEqual(response.code, 0)
+
+    async def test_register_account_rejects_duplicate_address(self):
+        # Täze hasap üçin açar jübütini döretmek
+        private_key, _ = generate_keypair()
+
+        tx = create_signed_registration_transaction(private_key)
+        raw_tx = encode_transaction(tx)
+
+        accounts = self.storage.get_all_accounts()
+
+        # Birinji hasaba alşy ýerine ýetirmek
+        self.app._apply_transaction(accounts, raw_tx)
+
+        # Şol bir adres bilen gaýtadan hasaba alşy ret etmek
+        with self.assertRaises(ValueError):
+            self.app._apply_transaction(accounts, raw_tx)
+
+    async def test_registered_account_survives_restart(self):
+        # Täze hasap döretmek
+        private_key, _ = generate_keypair()
+        tx = create_signed_registration_transaction(private_key)
+
+        await self.app.finalize_block(
+            self.make_finalize_request(
+                height=1,
+                txs=[encode_transaction(tx)],
+            )
+        )
+
+        await self.app.commit(RequestCommit())
+
+        # Programmany täzeden işe girizmek
+        restarted_storage = TMCStorage(self.db_path)
+        restarted_app = TMCApp(storage=restarted_storage)
+
+        # Hasabyň dikeldilendigini barlamak
+        account = restarted_storage.get_account(tx["address"])
+
+        self.assertIsNotNone(account)
+        self.assertEqual(account["balance_minor"], 0)
+        self.assertEqual(account["nonce"], 0)
+        self.assertEqual(restarted_app.height, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

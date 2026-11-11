@@ -155,6 +155,26 @@ class TMCApp(
         # Tranzaksiýanyň görnüşini we goluny barlamak
         tx = decode_transaction(raw_tx)
 
+        # Täze hasaby hasaba almak
+        if tx["type"] == "register_account":
+            address = tx["address"]
+
+            if address in accounts:
+                raise ValueError("Bu hasap eýýäm hasaba alnan.")
+
+            accounts[address] = {
+                "address": address,
+                "balance_minor": 0,
+                "nonce": 0,
+                "public_key": tx["public_key"],
+            }
+
+            return
+
+        # Adaty töleg tranzaksiýasy
+        if tx["type"] != "transfer":
+            raise ValueError("Tranzaksiýanyň görnüşi nädogry.")
+
         sender_address = tx["sender"]
         recipient_address = tx["recipient"]
 
@@ -181,7 +201,6 @@ class TMCApp(
         if sender["balance_minor"] < amount:
             raise ValueError("Hasapda serişdeler ýeterlik däl.")
 
-        # Alyjynyň balansynyň çäkden geçmeýändigini barlamak
         if recipient["balance_minor"] > MAX_INTEGER - amount:
             raise ValueError("Alyjynyň balansy rugsat edilen çäkden geçýär.")
 

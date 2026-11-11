@@ -1,4 +1,3 @@
-
 import hashlib
 import json
 
@@ -12,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from tmc_constants import MAX_INTEGER
 
 DOMAIN = b"TMC-TRANSACTION-V1\x00"
+REGISTER_DOMAIN = b"TMC-REGISTER-V1\x00"
 
 
 def generate_keypair():
@@ -46,18 +46,29 @@ def canonical_json(data):
 
 
 def transaction_signing_bytes(transaction):
-    """Return exactly the bytes that must be signed."""
-    fields = {
-        "type": transaction["type"],
-        "sender": transaction["sender"],
-        "recipient": transaction["recipient"],
-        "amount_minor": transaction["amount_minor"],
-        "nonce": transaction["nonce"],
-        "public_key": transaction["public_key"],
-    }
+    """Tranzaksiýa üçin gol çekilýän maglumatlary taýýarlamak."""
+    if transaction["type"] == "transfer":
+        fields = {
+            "type": transaction["type"],
+            "sender": transaction["sender"],
+            "recipient": transaction["recipient"],
+            "amount_minor": transaction["amount_minor"],
+            "nonce": transaction["nonce"],
+            "public_key": transaction["public_key"],
+        }
 
-    return DOMAIN + canonical_json(fields)
+        return DOMAIN + canonical_json(fields)
 
+    if transaction["type"] == "register_account":
+        fields = {
+            "type": transaction["type"],
+            "address": transaction["address"],
+            "public_key": transaction["public_key"],
+        }
+
+        return REGISTER_DOMAIN + canonical_json(fields)
+
+    raise ValueError("Tranzaksiýanyň görnüşi nädogry.")
 
 def create_signed_transaction(
     private_key,
@@ -99,51 +110,95 @@ def create_signed_transaction(
     transaction["signature"] = signature.hex()
     return transaction
 
+def create_signed_registration_transaction(private_key):
+    """Täze hasaby hasaba almak üçin gol çekilen tranzaksiýa döretmek."""
+    if not isinstance(private_key, Ed25519PrivateKey):
+        raise ValueError("Invalid private key")
+
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+
+    transaction = {
+        "type": "register_account",
+        "address": address_from_public_key(public_key),
+        "public_key": public_key.hex(),
+    }
+
+    signature = private_key.sign(
+        transaction_signing_bytes(transaction)
+    )
+
+    transaction["signature"] = signature.hex()
+
+    return transaction
+
 
 def verify_transaction(transaction):
-    """Validate transaction structure, sender address and signature."""
+    """Tranzaksiýanyň gurluşyny we goluny barlamak."""
     try:
         if not isinstance(transaction, dict):
             return False
 
-        expected_fields = {
-            "type",
-            "sender",
-            "recipient",
-            "amount_minor",
-            "nonce",
-            "public_key",
-            "signature",
-        }
+        tx_type = transaction.get("type")
 
-        if set(transaction.keys()) != expected_fields:
-            return False
+        if tx_type == "transfer":
+            expected_fields = {
+                "type",
+                "sender",
+                "recipient",
+                "amount_minor",
+                "nonce",
+                "public_key",
+                "signature",
+            }
 
-        if transaction["type"] != "transfer":
-            return False
+            if set(transaction.keys()) != expected_fields:
+                return False
 
-        if not isinstance(transaction["sender"], str):
-            return False
+            if not isinstance(transaction["sender"], str):
+                return False
 
-        if not isinstance(transaction["recipient"], str):
-            return False
+            if not isinstance(transaction["recipient"], str):
+                return False
 
-        if not transaction["sender"].strip():
-            return False
+            if not transaction["sender"].strip():
+                return False
 
-        if not transaction["recipient"].strip():
-            return False
+            if not transaction["recipient"].strip():
+                return False
 
-        if type(transaction["amount_minor"]) is not int:
-            return False
+            if type(transaction["amount_minor"]) is not int:
+                return False
 
-        if not 0 < transaction["amount_minor"] <= MAX_INTEGER:
-            return False
+            if not 0 < transaction["amount_minor"] <= MAX_INTEGER:
+                return False
 
-        if type(transaction["nonce"]) is not int:
-            return False
+            if type(transaction["nonce"]) is not int:
+                return False
 
-        if not 0 < transaction["nonce"] <= MAX_INTEGER:
+            if not 0 < transaction["nonce"] <= MAX_INTEGER:
+                return False
+
+        elif tx_type == "register_account":
+            expected_fields = {
+                "type",
+                "address",
+                "public_key",
+                "signature",
+            }
+
+            if set(transaction.keys()) != expected_fields:
+                return False
+
+            if not isinstance(transaction["address"], str):
+                return False
+
+            if not transaction["address"].strip():
+                return False
+
+        else:
             return False
 
         if not isinstance(transaction["public_key"], str):
@@ -161,17 +216,20 @@ def verify_transaction(transaction):
         if len(signature_bytes) != 64:
             return False
 
-        # Açaryň we goluň hexadecimal görnüşini barlamak.
         if transaction["public_key"] != public_key_bytes.hex():
             return False
 
         if transaction["signature"] != signature_bytes.hex():
             return False
 
-        expected_sender = address_from_public_key(public_key_bytes)
+        expected_address = address_from_public_key(public_key_bytes)
 
-        if transaction["sender"] != expected_sender:
-            return False
+        if tx_type == "transfer":
+            if transaction["sender"] != expected_address:
+                return False
+        else:
+            if transaction["address"] != expected_address:
+                return False
 
         public_key = Ed25519PublicKey.from_public_bytes(
             public_key_bytes
@@ -191,7 +249,6 @@ def verify_transaction(transaction):
         InvalidSignature,
     ):
         return False
-
 
 def transaction_id(transaction):
     """Calculate an identifier for a valid signed transaction."""
@@ -261,7 +318,6 @@ def decode_transaction(raw):
 
     return transaction
 
-
 def apply_block_transactions(storage, transactions):
     """Validate and atomically apply a block's transfers."""
     if not isinstance(transactions, list):
@@ -269,8 +325,16 @@ def apply_block_transactions(storage, transactions):
 
     transfers = []
 
-    # Validate every signature before changing account balances.
+    # Ähli tranzaksiýalary balansy üýtgetmezden öň barlamak.
     for transaction in transactions:
+        if not isinstance(transaction, dict):
+            raise ValueError("Invalid transaction format")
+
+        if transaction.get("type") != "transfer":
+            raise ValueError(
+                "Only transfer transactions are supported"
+            )
+
         if not verify_transaction(transaction):
             raise ValueError("Invalid transaction signature")
 
