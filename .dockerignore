@@ -1,15 +1,19 @@
-.git
-.github
-.idea
-.vscode
+.git/
+.gitignore
 
 env/
 venv/
+venv311/
 __pycache__/
+*.pyc
 .pytest_cache/
 
-*.pyc
-*.log
-
-data/
+validators/
 cometbft-data/
+cometbft-data-backup/
+data/
+*.db
+
+app/
+.env
+.env.*

@@ -1,9 +1,98 @@
 services:
-  cometbft:
+  # TMC ABCI uygulamalary
+
+  tmc1:
+    build: .
+    container_name: tmc1
+    environment:
+      TMC_DB_PATH: /app/data/tmc1.db
+    volumes:
+      - ./data/validator1:/app/data
+    expose:
+      - "26658"
+    restart: unless-stopped
+    
+
+  tmc2:
+    build: .
+    container_name: tmc2
+    environment:
+      TMC_DB_PATH: /app/data/tmc2.db
+    volumes:
+      - ./data/validator2:/app/data
+    expose:
+      - "26658"
+    restart: unless-stopped
+    
+
+  tmc3:
+    build: .
+    container_name: tmc3
+    environment:
+      TMC_DB_PATH: /app/data/tmc3.db
+    volumes:
+      - ./data/validator3:/app/data
+    expose:
+      - "26658"
+    restart: unless-stopped    
+
+  tmc4:
+    build: .
+    container_name: tmc4
+    environment:
+      TMC_DB_PATH: /app/data/tmc4.db
+    volumes:
+      - ./data/validator4:/app/data
+    expose:
+      - "26658"
+    restart: unless-stopped    
+
+  # CometBFT validatorlary
+
+  validator1:
     image: cometbft/cometbft:v0.38.26
-    command: ["node", "--proxy_app=tcp://host.docker.internal:26658"]
+    container_name: validator1
+    command: ["node", "--home=/cometbft"]
+    volumes:
+      - ./validators/validator1:/cometbft
     ports:
       - "26656:26656"
       - "26657:26657"
+    depends_on:
+      - tmc1
+
+  validator2:
+    image: cometbft/cometbft:v0.38.26
+    container_name: validator2
+    command: ["node", "--home=/cometbft"]
     volumes:
-      - ./cometbft-data:/cometbft
+      - ./validators/validator2:/cometbft
+    ports:
+      - "26666:26656"
+      - "26667:26657"
+    depends_on:
+      - tmc2
+
+  validator3:
+    image: cometbft/cometbft:v0.38.26
+    container_name: validator3
+    command: ["node", "--home=/cometbft"]
+    volumes:
+      - ./validators/validator3:/cometbft
+    ports:
+      - "26676:26656"
+      - "26677:26657"
+    depends_on:
+      - tmc3
+
+  validator4:
+    image: cometbft/cometbft:v0.38.26
+    container_name: validator4
+    command: ["node", "--home=/cometbft"]
+    volumes:
+      - ./validators/validator4:/cometbft
+    ports:
+      - "26686:26656"
+      - "26687:26657"
+    depends_on:
+      - tmc4

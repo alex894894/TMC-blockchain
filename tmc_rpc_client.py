@@ -61,7 +61,7 @@ class TMCRPCClient:
         result = self._request(
             "abci_query",
             {
-                "path": f"/account/{address}",
+                "path": json.dumps(f"/account/{address}"),
                 "prove": "false",
             },
         )
@@ -88,7 +88,7 @@ class TMCRPCClient:
         result = self._request(
             "abci_query",
             {
-                "path": "/state",
+                "path": json.dumps("/state"),
                 "prove": "false",
             },
         )
