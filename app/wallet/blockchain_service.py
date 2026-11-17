@@ -1,3 +1,4 @@
+from .models import Wallet
 from tmc_rpc_client import TMCRPCClient, TMCClientError
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 

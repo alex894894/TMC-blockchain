@@ -12,7 +12,7 @@ from tmc_constants import MAX_INTEGER
 
 DOMAIN = b"TMC-TRANSACTION-V1\x00"
 REGISTER_DOMAIN = b"TMC-REGISTER-V1\x00"
-
+MINT_DOMAIN = b"TMC-MINT-V1\x00"
 
 def generate_keypair():
     """Create an Ed25519 private/public key pair."""
@@ -67,6 +67,17 @@ def transaction_signing_bytes(transaction):
         }
 
         return REGISTER_DOMAIN + canonical_json(fields)
+
+    if transaction["type"] == "mint":
+        fields = {
+            "type": transaction["type"],
+            "recipient": transaction["recipient"],
+            "amount_minor": transaction["amount_minor"],
+            "nonce": transaction["nonce"],
+            "public_key": transaction["public_key"],
+        }
+
+        return MINT_DOMAIN + canonical_json(fields)
 
     raise ValueError("Tranzaksiýanyň görnüşi nädogry.")
 
@@ -134,6 +145,47 @@ def create_signed_registration_transaction(private_key):
 
     return transaction
 
+def create_signed_mint_transaction(
+    issuer_private_key,
+    recipient,
+    amount_minor,
+    nonce,
+):
+    """Emissiýa üçin gol çekilen tranzaksiýa döretmek."""
+    if not isinstance(issuer_private_key, Ed25519PrivateKey):
+        raise ValueError("Invalid issuer private key")
+
+    if not isinstance(recipient, str) or not recipient.strip():
+        raise ValueError("Recipient must not be empty")
+
+    if type(amount_minor) is not int or not 0 < amount_minor <= MAX_INTEGER:
+        raise ValueError("TMC möçberi nädogry.")
+
+    if type(nonce) is not int or not 0 < nonce <= MAX_INTEGER:
+        raise ValueError("Emissiýa nonce bahasy nädogry.")
+
+    public_key = issuer_private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+
+    transaction = {
+        "type": "mint",
+        "recipient": recipient,
+        "amount_minor": amount_minor,
+        "nonce": nonce,
+        "public_key": public_key.hex(),
+    }
+
+    signature = issuer_private_key.sign(
+        transaction_signing_bytes(transaction)
+    )
+
+    transaction["signature"] = signature.hex()
+
+    return transaction
+
+
 
 def verify_transaction(transaction):
     """Tranzaksiýanyň gurluşyny we goluny barlamak."""
@@ -196,6 +248,37 @@ def verify_transaction(transaction):
                 return False
 
             if not transaction["address"].strip():
+                return False
+
+        elif tx_type == "mint":
+            expected_fields = {
+                "type",
+                "recipient",
+                "amount_minor",
+                "nonce",
+                "public_key",
+                "signature",
+            }
+
+            if set(transaction.keys()) != expected_fields:
+                return False
+
+            if not isinstance(transaction["recipient"], str):
+                return False
+
+            if not transaction["recipient"].strip():
+                return False
+
+            if type(transaction["amount_minor"]) is not int:
+                return False
+
+            if not 0 < transaction["amount_minor"] <= MAX_INTEGER:
+                return False
+
+            if type(transaction["nonce"]) is not int:
+                return False
+
+            if not 0 < transaction["nonce"] <= MAX_INTEGER:
                 return False
 
         else:

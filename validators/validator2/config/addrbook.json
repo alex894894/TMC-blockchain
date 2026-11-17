@@ -15,11 +15,12 @@
 			"buckets": [
 				148,
 				181,
-				85
+				85,
+				45
 			],
-			"attempts": 3,
+			"attempts": 4,
 			"bucket_type": 1,
-			"last_attempt": "2026-11-16T12:45:01.1250855Z",
+			"last_attempt": "2026-11-17T05:26:34.8920539Z",
 			"last_success": "0001-01-01T00:00:00Z",
 			"last_ban_time": "0001-01-01T00:00:00Z"
 		},
@@ -37,7 +38,8 @@
 			"buckets": [
 				148,
 				181,
-				85
+				85,
+				45
 			],
 			"attempts": 2,
 			"bucket_type": 1,
@@ -59,11 +61,12 @@
 			"buckets": [
 				148,
 				181,
-				85
+				85,
+				45
 			],
-			"attempts": 2,
+			"attempts": 3,
 			"bucket_type": 1,
-			"last_attempt": "2026-11-16T12:27:45.4313646Z",
+			"last_attempt": "2026-11-17T05:26:34.8920705Z",
 			"last_success": "0001-01-01T00:00:00Z",
 			"last_ban_time": "0001-01-01T00:00:00Z"
 		},
@@ -81,11 +84,12 @@
 			"buckets": [
 				148,
 				181,
-				85
+				85,
+				45
 			],
-			"attempts": 10,
+			"attempts": 11,
 			"bucket_type": 1,
-			"last_attempt": "2026-11-16T12:27:45.4311699Z",
+			"last_attempt": "2026-11-17T05:26:34.8920351Z",
 			"last_success": "0001-01-01T00:00:00Z",
 			"last_ban_time": "0001-01-01T00:00:00Z"
 		}
