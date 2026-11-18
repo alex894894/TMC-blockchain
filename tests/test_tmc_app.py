@@ -1,4 +1,3 @@
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,8 +23,10 @@ from tmc_transaction import (
     encode_transaction,
 )
 from abci.types import RequestCheckTx
+from tmc_transaction import create_signed_mint_transaction
 
 from tmc_constants import MAX_INTEGER
+
 
 class TestTMCApp(unittest.IsolatedAsyncioTestCase):
 
@@ -777,7 +778,211 @@ class TestTMCApp(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(account["balance_minor"], 0)
         self.assertEqual(account["nonce"], 0)
         self.assertEqual(restarted_app.height, 1)
+    
+    async def test_mint_transaction_successfully(self):
+        # Emitentiň açar jübütini döretmek
+        issuer_private_key, issuer_public_key = generate_keypair()
 
+        self.app.issuer_public_key = issuer_public_key
+
+        # TMC çykarmak üçin tranzaksiýa döretmek
+        tx = create_signed_mint_transaction(
+            issuer_private_key,
+            recipient=self.recipient,
+            amount_minor=50000,
+            nonce=1,
+        )
+
+        raw_tx = encode_transaction(tx)
+
+        # Tranzaksiýany barlamak
+        check_response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+
+        self.assertEqual(check_response.code, 0)
+
+        # Blokda ýerine ýetirmek
+        finalize_response = await self.app.finalize_block(
+            self.make_finalize_request(
+                self.app.height + 1,
+                [raw_tx],
+            )
+        )
+
+        self.assertEqual(finalize_response.tx_results[0].code, 0)
+
+        # Üýtgeşmeleri saklamak
+        await self.app.commit(RequestCommit())
+
+        account = self.storage.get_account(self.recipient)
+        self.assertEqual(account["balance_minor"], 50000)
+
+        chain_state = self.storage.get_chain_state()
+        self.assertEqual(chain_state["issuer_nonce"], 1)
+
+        # Programmany täzeden işe girizip ýagdaýy barlamak.
+        restarted_app = TMCApp(storage=self.storage)
+
+        restarted_account = self.storage.get_account(self.recipient)
+        restarted_state = self.storage.get_chain_state()
+
+        self.assertEqual(
+            restarted_account["balance_minor"],
+            50000,
+        )
+
+        self.assertEqual(
+            restarted_state["issuer_nonce"],
+            1,
+        )
+
+        self.assertEqual(
+            restarted_app.height,
+            self.app.height,
+        )
+
+    async def test_mint_rejected_without_configured_issuer(self):
+        # Emitentiň açary sazlanmadyk ýagdaýynda emissiýany ret etmek.
+        issuer_private_key, _ = generate_keypair()
+
+        self.app.issuer_public_key = None
+
+        tx = create_signed_mint_transaction(
+            issuer_private_key,
+            recipient=self.recipient,
+            amount_minor=50000,
+            nonce=1,
+        )
+
+        raw_tx = encode_transaction(tx)
+
+        response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+
+        self.assertNotEqual(response.code, 0)
+    
+    async def test_mint_rejected_with_wrong_issuer_key(self):
+        # Yalňyş emitent açary bilen emissiýany ret etmek.
+        trusted_private_key, trusted_public_key = generate_keypair()
+        attacker_private_key, _ = generate_keypair()
+
+        self.app.issuer_public_key = trusted_public_key
+
+        tx = create_signed_mint_transaction(
+            attacker_private_key,
+            recipient=self.recipient,
+            amount_minor=50000,
+            nonce=1,
+        )
+
+        raw_tx = encode_transaction(tx)
+
+        response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+
+        self.assertNotEqual(response.code, 0)
+    
+    async def test_mint_rejected_after_nonce_replay(self):
+        # Öň ulanylan nonce bilen gaýtadan emissiýa etmegi ret etmek.
+        issuer_private_key, issuer_public_key = generate_keypair()
+
+        self.app.issuer_public_key = issuer_public_key
+
+        tx = create_signed_mint_transaction(
+            issuer_private_key,
+            recipient=self.recipient,
+            amount_minor=50000,
+            nonce=1,
+        )
+
+        raw_tx = encode_transaction(tx)
+
+        # Birinji gezek tranzaksiýany barlamak.
+        check_response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+        self.assertEqual(check_response.code, 0)
+
+        # Tranzaksiýany bloka goşmak.
+        finalize_response = await self.app.finalize_block(
+            self.make_finalize_request(
+                self.app.height + 1,
+                [raw_tx],
+            )
+        )
+
+        self.assertEqual(finalize_response.tx_results[0].code, 0)
+
+        # Üýtgeşmeleri maglumatlar bazasyna ýazmak.
+        await self.app.commit(RequestCommit())
+
+        # Şol bir tranzaksiýany ikinji gezek ibermek.
+        replay_response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+
+        self.assertNotEqual(replay_response.code, 0)
+
+    async def test_mint_rejected_for_unknown_recipient(self):
+        # Hasaba alynmadyk alyja TMC ibermegi ret etmek.
+        issuer_private_key, issuer_public_key = generate_keypair()
+
+        self.app.issuer_public_key = issuer_public_key
+
+        tx = create_signed_mint_transaction(
+            issuer_private_key,
+            recipient="tmc_" + "a" * 40,
+            amount_minor=50000,
+            nonce=1,
+        )
+
+        raw_tx = encode_transaction(tx)
+
+        response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+
+        self.assertNotEqual(response.code, 0)
+    
+    async def test_mint_rejected_on_balance_overflow(self):
+        # Balansyň rugsat edilen iň ýokary çäginden geçmegini ret etmek.
+        issuer_private_key, issuer_public_key = generate_keypair()
+
+        self.app.issuer_public_key = issuer_public_key
+
+        # Alyjynyň balansyny iň ýokary çäge ýetirmek.
+        accounts = self.storage.get_all_accounts()
+        accounts[self.recipient]["balance_minor"] = MAX_INTEGER
+
+        self.storage.save_committed_state(
+            accounts=accounts,
+            height=self.app.height,
+            app_hash="0" * 64,
+            issuer_nonce=0,
+        )
+
+        # Balansdan artyk 1 birlik çykarmaga synanyşmak.
+        tx = create_signed_mint_transaction(
+            issuer_private_key,
+            recipient=self.recipient,
+            amount_minor=1,
+            nonce=1,
+        )
+
+        raw_tx = encode_transaction(tx)
+
+        response = await self.app.check_tx(
+            RequestCheckTx(tx=raw_tx)
+        )
+
+        self.assertNotEqual(response.code, 0)
+
+        # Balansyň üýtgemändigini barlamak.
+        account = self.storage.get_account(self.recipient)
+        self.assertEqual(account["balance_minor"], MAX_INTEGER)
 
 if __name__ == "__main__":
     unittest.main()

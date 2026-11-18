@@ -1,4 +1,3 @@
-
 import sqlite3
 import tempfile
 import unittest
@@ -294,5 +293,51 @@ class TestTMCStorage(unittest.TestCase):
         self.assertEqual(account["nonce"], 2)
         self.assertEqual(state["height"], 5)
         self.assertEqual(state["app_hash"], "test_app_hash")
+
+    def test_issuer_nonce_defaults_to_zero(self):
+        state = self.storage.get_chain_state()
+
+        self.assertEqual(state["issuer_nonce"], 0)
+
+
+    def test_save_committed_state_with_issuer_nonce(self):
+        accounts = {
+            "tmc_alice": {
+                "balance_minor": 5000,
+                "nonce": 2,
+                "public_key": None,
+            }
+        }
+
+        self.storage.save_committed_state(
+            accounts,
+            5,
+            "test_app_hash",
+            issuer_nonce=3,
+        )
+
+        state = self.storage.get_chain_state()
+
+        self.assertEqual(state["height"], 5)
+        self.assertEqual(state["issuer_nonce"], 3)
+
+
+    def test_invalid_issuer_nonce_rejected(self):
+        accounts = {}
+
+        with self.assertRaises(ValueError):
+            self.storage.save_committed_state(
+                accounts,
+                1,
+                "test_app_hash",
+                issuer_nonce=MAX_INTEGER + 1,
+            )
+
+        state = self.storage.get_chain_state()
+
+        self.assertEqual(state["height"], 0)
+        self.assertEqual(state["issuer_nonce"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

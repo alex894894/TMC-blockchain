@@ -310,9 +310,12 @@ def verify_transaction(transaction):
         if tx_type == "transfer":
             if transaction["sender"] != expected_address:
                 return False
-        else:
+
+        elif tx_type == "register_account":
             if transaction["address"] != expected_address:
                 return False
+
+# Mint üçin emitentiň açary TMCApp tarapyndan barlanýar.
 
         public_key = Ed25519PublicKey.from_public_bytes(
             public_key_bytes

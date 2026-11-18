@@ -50,7 +50,9 @@ class TMCStorage:
                 CREATE TABLE IF NOT EXISTS chain_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     height INTEGER NOT NULL DEFAULT 0,
-                    app_hash TEXT NOT NULL DEFAULT ''
+                    app_hash TEXT NOT NULL DEFAULT '',
+                    issuer_nonce INTEGER NOT NULL DEFAULT 0
+                        CHECK (issuer_nonce >= 0)
                 )
             """)
 
@@ -79,6 +81,21 @@ class TMCStorage:
                     ADD COLUMN public_key TEXT
                     """
                 )
+            
+            # Köne maglumatlar bazasyna issuer_nonce meýdanyny goşmak.
+            chain_state_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(chain_state)"
+                ).fetchall()
+            }
+
+            if "issuer_nonce" not in chain_state_columns:
+                connection.execute("""
+                    ALTER TABLE chain_state
+                    ADD COLUMN issuer_nonce INTEGER NOT NULL DEFAULT 0
+                    CHECK (issuer_nonce >= 0)
+                """)
 
     def register_account(
         self,
@@ -408,7 +425,7 @@ class TMCStorage:
     def get_chain_state(self):
         with self.connect() as connection:
             row = connection.execute("""
-                SELECT height, app_hash
+                SELECT height, app_hash, issuer_nonce
                 FROM chain_state
                 WHERE id = 1
             """).fetchone()
@@ -416,6 +433,7 @@ class TMCStorage:
         return {
             "height": row["height"],
             "app_hash": row["app_hash"],
+            "issuer_nonce": row["issuer_nonce"],
         }
 
     def save_committed_state(
@@ -423,6 +441,7 @@ class TMCStorage:
         accounts,
         height,
         app_hash,
+        issuer_nonce=0,
     ):
         # Blok beýikligini barlamak.
         if type(height) is not int:
@@ -430,6 +449,13 @@ class TMCStorage:
 
         if not 0 <= height <= MAX_INTEGER:
             raise ValueError("Blok beýikligi rugsat edilen çäkden çykýar.")
+        
+        # Emitentiň nonce bahasyny barlamak.
+        if type(issuer_nonce) is not int:
+            raise ValueError("Issuer nonce bitewi san bolmaly.")
+
+        if not 0 <= issuer_nonce <= MAX_INTEGER:
+            raise ValueError("Issuer nonce rugsat edilen çäkden çykýar.")
 
         if not isinstance(app_hash, str):
             raise ValueError("Blok hash-y nädogry.")        
@@ -493,6 +519,8 @@ class TMCStorage:
 
             connection.execute("""
                 UPDATE chain_state
-                SET height = ?, app_hash = ?
+                SET height = ?,
+                    app_hash = ?,
+                    issuer_nonce = ?
                 WHERE id = 1
-            """, (height, app_hash))
+            """, (height, app_hash, issuer_nonce))

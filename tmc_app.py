@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 from typing import Union
+import os
 
 from abci import abc
 from abci.abc import (
@@ -67,6 +68,24 @@ class TMCApp(
         # Tassyklanan ýagdaýy maglumatlar bazasyndan dikeltmek
         saved_state = self.storage.get_chain_state()
         self.height = saved_state["height"]
+        # Emitentiň ýagdaýyny dikeltmek
+        self.issuer_nonce = saved_state["issuer_nonce"]
+
+        # Emitentiň açyk açaryny daşky gurşawdan almak
+        issuer_public_key_hex = os.getenv("TMC_ISSUER_PUBLIC_KEY")
+
+        self.issuer_public_key = None
+
+        if issuer_public_key_hex:
+            try:
+                issuer_public_key = bytes.fromhex(issuer_public_key_hex)
+            except ValueError as exc:
+                raise ValueError("Emitentiň açyk açary nädogry.") from exc
+
+            if len(issuer_public_key) != 32:
+                raise ValueError("Emitentiň açyk açary 32 baýt bolmaly.")
+
+            self.issuer_public_key = issuer_public_key
 
         saved_hash = saved_state["app_hash"]
 
@@ -91,7 +110,10 @@ class TMCApp(
 
             # Hasaplaryň häzirki ýagdaýyny barlamak
             accounts = self.storage.get_all_accounts()
-            calculated_hash = self._state_hash(accounts)
+            calculated_hash = self._state_hash(
+                accounts,
+                self.issuer_nonce,
+            )
 
             if calculated_hash != stored_hash:
                 raise ValueError(
@@ -112,6 +134,7 @@ class TMCApp(
         self.pending_height = None
         self.pending_hash = None
         self.pending_accounts = None
+        self.pending_issuer_nonce = None
 
     @property
     def logger(self) -> logging.Logger:
@@ -129,9 +152,9 @@ class TMCApp(
         return self
 
     @staticmethod
-    def _state_hash(accounts):
+    def _state_hash(accounts, issuer_nonce=0):
         # Hasaplary hemişe birmeňzeş tertipde kodlamak
-        state = [
+        account_state = [
             {
                 "address": address,
                 "balance_minor": account["balance_minor"],
@@ -140,6 +163,15 @@ class TMCApp(
             }
             for address, account in sorted(accounts.items())
         ]
+
+        # Köne bloklaryň hash formatyny saklamak
+        if issuer_nonce == 0:
+            state = account_state
+        else:
+            state = {
+                "accounts": account_state,
+                "issuer_nonce": issuer_nonce,
+            }
 
         encoded = json.dumps(
             state,
@@ -150,9 +182,8 @@ class TMCApp(
 
         return hashlib.sha256(encoded).digest()
 
-    @staticmethod
-    def _apply_transaction(accounts, raw_tx):
-        # Tranzaksiýanyň görnüşini we goluny barlamak
+    def _apply_transaction(self, accounts, raw_tx, issuer_nonce=0):
+    # Tranzaksiýanyň görnüşini we goluny barlamak
         tx = decode_transaction(raw_tx)
 
         # Täze hasaby hasaba almak
@@ -169,7 +200,37 @@ class TMCApp(
                 "public_key": tx["public_key"],
             }
 
-            return
+            return issuer_nonce
+
+        # TMC çykarmak
+        if tx["type"] == "mint":
+            if self.issuer_public_key is None:
+                raise ValueError("Emitentiň açyk açary sazlanmady.")
+
+            if tx["public_key"] != self.issuer_public_key.hex():
+                raise ValueError("Emitentiň açyk açary gabat gelmeýär.")
+
+            if issuer_nonce >= MAX_INTEGER:
+                raise ValueError("Emitentiň nonce çägi doldu.")
+
+            if tx["nonce"] != issuer_nonce + 1:
+                raise ValueError("Emitentiň nonce bahasy nädogry.")
+
+            recipient_address = tx["recipient"]
+            recipient = accounts.get(recipient_address)
+
+            if recipient is None:
+                raise ValueError("TMC alyjysynyň hasaby tapylmady.")
+
+            amount = tx["amount_minor"]
+
+            if recipient["balance_minor"] > MAX_INTEGER - amount:
+                raise ValueError("Alyjynyň balansy rugsat edilen çäkden geçýär.")
+
+            # TMC serişdelerini hasaba goşmak
+            recipient["balance_minor"] += amount
+
+            return tx["nonce"]
 
         # Adaty töleg tranzaksiýasy
         if tx["type"] != "transfer":
@@ -193,6 +254,9 @@ class TMCApp(
         if sender["public_key"] != tx["public_key"]:
             raise ValueError("Açyk açar hasaba gabat gelmeýär.")
 
+        if sender["nonce"] >= MAX_INTEGER:
+            raise ValueError("Iberijiniň nonce çägi doldu.")
+
         if tx["nonce"] != sender["nonce"] + 1:
             raise ValueError("Tranzaksiýanyň nonce bahasy nädogry.")
 
@@ -208,6 +272,8 @@ class TMCApp(
         sender["balance_minor"] -= amount
         sender["nonce"] = tx["nonce"]
         recipient["balance_minor"] += amount
+
+        return issuer_nonce
 
     async def info(self, req: RequestInfo) -> ResponseInfo:
         return ResponseInfo(
@@ -244,13 +310,17 @@ class TMCApp(
         accounts = self.storage.get_all_accounts()
 
         # Genesis ýagdaýynyň hash bahasyny hasaplamak
-        self.app_hash = self._state_hash(accounts)
+        self.app_hash = self._state_hash(
+            accounts,
+            self.issuer_nonce,
+        )
 
         # Başlangyç ýagdaýy maglumatlar bazasyna ýazmak
         self.storage.save_committed_state(
             accounts=accounts,
             height=0,
             app_hash=self.app_hash.hex(),
+            issuer_nonce=self.issuer_nonce,
         )
 
         self.height = 0
@@ -262,13 +332,20 @@ class TMCApp(
     ) -> ResponseCheckTx:
         # Tranzaksiýanyň deslapky barlagy
         try:
-            tx = decode_transaction(req.tx)
             accounts = self.storage.get_all_accounts()
-            self._apply_transaction(accounts, req.tx)
-        except (ValueError, TypeError, KeyError, OverflowError):
+            issuer_nonce = self.storage.get_chain_state()["issuer_nonce"]
+
+            self._apply_transaction(
+                accounts,
+                req.tx,
+                issuer_nonce,
+            )
+
+        except (ValueError, TypeError, KeyError, OverflowError) as exc:
+            self._logger.exception("Tranzaksiýa barlagynda ýalňyşlyk:")
             return ResponseCheckTx(
                 code=1,
-                log="Tranzaksiýa barlagdan geçmedi.",
+                log=str(exc),
             )
 
         return ResponseCheckTx(
@@ -308,6 +385,7 @@ class TMCApp(
                     "height": self.height,
                     "app_hash": self.app_hash.hex(),
                     "accounts": self.storage.get_all_accounts(),
+                    "issuer_nonce": self.issuer_nonce,
                 }
 
                 return ResponseQuery(
@@ -338,6 +416,7 @@ class TMCApp(
     ) -> ResponsePrepareProposal:
         # Teklip üçin hasaplaryň wagtlaýyn ýagdaýyny almak
         accounts = self.storage.get_all_accounts()
+        issuer_nonce = self.storage.get_chain_state()["issuer_nonce"]
         selected_txs = []
         total_bytes = 0
         max_bytes = max(0, req.max_tx_bytes)
@@ -353,13 +432,18 @@ class TMCApp(
             candidate_accounts = copy.deepcopy(accounts)
 
             try:
-                self._apply_transaction(candidate_accounts, raw_tx)
+                candidate_issuer_nonce = self._apply_transaction(
+                    candidate_accounts,
+                    raw_tx,
+                    issuer_nonce,
+                )
             except (ValueError, TypeError, KeyError, OverflowError):
                 # Nädogry tranzaksiýany teklibe goşmazlyk
                 continue
 
             # Diňe dogry tranzaksiýany we onuň ýagdaýyny kabul etmek
             selected_txs.append(raw_tx)
+            issuer_nonce = candidate_issuer_nonce
             total_bytes += tx_size
             accounts = candidate_accounts
 
@@ -371,10 +455,15 @@ class TMCApp(
     ) -> ResponseProcessProposal:
         # Teklipdäki ähli tranzaksiýalary wagtlaýyn barlamak
         accounts = self.storage.get_all_accounts()
+        issuer_nonce = self.storage.get_chain_state()["issuer_nonce"]
 
         try:
             for raw_tx in req.txs:
-                self._apply_transaction(accounts, raw_tx)
+                issuer_nonce = self._apply_transaction(
+                    accounts,
+                    raw_tx,
+                    issuer_nonce,
+                )
         except (ValueError, TypeError, KeyError, OverflowError):
             return ResponseProcessProposal(
                 status=ProposalStatus.REJECT
@@ -403,6 +492,7 @@ class TMCApp(
 
         # Tassyklanan ýagdaýdan wagtlaýyn nusga almak
         accounts = self.storage.get_all_accounts()
+        issuer_nonce = self.storage.get_chain_state()["issuer_nonce"]
 
         # Blok beýikligini barlamak
         if req.height != self.height + 1:
@@ -413,10 +503,15 @@ class TMCApp(
         # Ähli tranzaksiýalary wagtlaýyn ýagdaýda barlamak
         try:
             for raw_tx in req.txs:
-                self._apply_transaction(accounts, raw_tx)
+                issuer_nonce = self._apply_transaction(
+                    accounts,
+                    raw_tx,
+                    issuer_nonce,
+                )
 
         except (ValueError, TypeError, KeyError, OverflowError):
             accounts = self.storage.get_all_accounts()
+            issuer_nonce = self.storage.get_chain_state()["issuer_nonce"]
 
             results = [
                 ExecTxResult(
@@ -435,9 +530,10 @@ class TMCApp(
                 for _ in req.txs
             ]
 
-        new_hash = self._state_hash(accounts)
+        new_hash = self._state_hash(accounts, issuer_nonce)
 
         self.pending_height = req.height
+        self.pending_issuer_nonce = issuer_nonce
         self.pending_hash = new_hash
         self.pending_accounts = accounts
 
@@ -461,14 +557,17 @@ class TMCApp(
                 accounts=self.pending_accounts,
                 height=self.pending_height,
                 app_hash=self.pending_hash.hex(),
+                issuer_nonce=self.pending_issuer_nonce,
             )
 
             self.height = self.pending_height
             self.app_hash = self.pending_hash
+            self.issuer_nonce = self.pending_issuer_nonce
 
             self.pending_height = None
             self.pending_hash = None
             self.pending_accounts = None
+            self.pending_issuer_nonce = None
 
         return ResponseCommit()
 
