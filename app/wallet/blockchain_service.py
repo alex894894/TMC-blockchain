@@ -1,8 +1,10 @@
+
 from .models import Wallet
 from tmc_rpc_client import TMCRPCClient, TMCClientError
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from tmc_transaction import create_signed_registration_transaction
+from tmc_transaction import (
+    verify_transaction,
+)
 
 
 # CometBFT RPC klienti
@@ -44,30 +46,30 @@ def get_chain_state():
     """
     return _client.get_chain_state()
 
-def register_wallet_on_blockchain(private_key_hex):
+
+def register_signed_wallet_on_blockchain(transaction):
     """
-    TMC gapjygyny blokcheýn ulgamynda hasaba almak.
+    Brauzerde gol çekilen tranzaksiýany barlap,
+    TMC toruna ibermek.
     """
-    try:
-        private_key_bytes = bytes.fromhex(private_key_hex)
 
-        private_key = Ed25519PrivateKey.from_private_bytes(
-            private_key_bytes
-        )
+    if not isinstance(transaction, dict):
+        raise ValueError("Nädogry tranzaksiýa maglumatlary.")
 
-        transaction = create_signed_registration_transaction(
-            private_key
-        )
+    if transaction.get("type") != "register_account":
+        raise ValueError("Tranzaksiýanyň görnüşi nädogry.")
 
-        return _client.broadcast_transaction(transaction)
+    if not verify_transaction(transaction):
+        raise ValueError("Tranzaksiýanyň goly nädogry.")
 
-    except (ValueError, TMCClientError):
-        raise
+    return _client.broadcast_transaction(transaction)
+
+
 def sync_wallet_registration(wallet):
     """
     Gapjygyň TMC blokcheýninde hasaba alnandygyny barlamak.
     """
-    if wallet.registration_status == "registered":
+    if wallet.registration_status == Wallet.RegistrationStatus.REGISTERED:
         return get_wallet_account(wallet.address)
 
     account = get_wallet_account(wallet.address)
