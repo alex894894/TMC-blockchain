@@ -1,0 +1,366 @@
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TMC - Wallet</title>
+</head>
+<body>
+    <h1>TMC Wallet</h1>
+
+    <p>
+        <a href="{% url 'dashboard' %}">Back to Dashboard</a>
+    </p>
+
+    {% if messages %}
+        {% for message in messages %}
+            <p>{{ message }}</p>
+        {% endfor %}
+    {% endif %}
+
+    {% if wallet and wallet.address %}
+        <h2>Connected Wallet</h2>
+
+        <p>Address: {{ wallet.address }}</p>
+        <p>Registration status: {{ wallet.registration_status }}</p>
+
+        {% if wallet.registration_tx_hash %}
+            <p>Transaction hash: {{ wallet.registration_tx_hash }}</p>
+        {% endif %}
+    {% else %}
+        <h2>No wallet connected</h2>
+        <p>Create a new wallet or import an existing backup.</p>
+    {% endif %}
+
+    <hr>
+
+    <h2>Wallet Management</h2>
+
+    <p>
+        Your private key is generated and encrypted locally.
+        It is never sent to the server.
+    </p>
+
+    <label for="wallet-password">Wallet password:</label>
+    <input
+        type="password"
+        id="wallet-password"
+        minlength="12"
+        autocomplete="new-password"
+    >
+
+    <br><br>
+
+    <label for="wallet-password-confirm">
+        Confirm wallet password:
+    </label>
+
+    <input
+        type="password"
+        id="wallet-password-confirm"
+        minlength="12"
+        autocomplete="new-password"
+    >
+
+    <br><br>
+
+    <button type="button" id="create-wallet-button">
+        Create New Wallet
+    </button>
+
+    <button type="button" id="import-wallet-button">
+        Import Wallet
+    </button>
+
+    <input
+        type="file"
+        id="wallet-backup-file"
+        accept=".tmcwallet"
+        hidden
+    >
+
+    <button
+        type="button"
+        id="export-wallet-button"
+        disabled
+    >
+        Export Backup
+    </button>
+
+    <hr>
+
+    <h3>Wallet Information</h3>
+
+    <p id="wallet-status">No wallet selected.</p>
+
+    <p>
+        Address:
+        <span id="wallet-address-display">Not available</span>
+    </p>
+
+    <form method="POST" id="wallet-registration-form">
+        {% csrf_token %}
+
+        <input
+            type="hidden"
+            name="wallet_address"
+            id="wallet-address"
+        >
+
+        <input
+            type="hidden"
+            name="wallet_public_key"
+            id="wallet-public-key"
+        >
+
+        <input
+            type="hidden"
+            name="wallet_transaction"
+            id="wallet-transaction"
+        >
+
+        <button
+            type="submit"
+            id="register-wallet-button"
+            disabled
+        >
+            Register Wallet on TMC
+        </button>
+    </form>
+
+    <script src="{% static 'accounts/js/tmc_wallet.js' %}"></script>
+
+    <script>
+        const walletPassword =
+            document.getElementById("wallet-password");
+
+        const walletPasswordConfirm =
+            document.getElementById("wallet-password-confirm");
+
+        const createButton =
+            document.getElementById("create-wallet-button");
+
+        const importButton =
+            document.getElementById("import-wallet-button");
+
+        const exportButton =
+            document.getElementById("export-wallet-button");
+
+        const registerButton =
+            document.getElementById("register-wallet-button");
+
+        const backupFile =
+            document.getElementById("wallet-backup-file");
+
+        const walletStatus =
+            document.getElementById("wallet-status");
+
+        const walletAddressDisplay =
+            document.getElementById("wallet-address-display");
+
+        const registrationForm =
+            document.getElementById("wallet-registration-form");
+
+        let activeWallet = null;
+
+
+        // Gapjygyň ýagdaýyny görkezmek.
+        function setWalletStatus(message) {
+            walletStatus.textContent = message;
+        }
+
+
+        // Saýlanan gapjygy interfeýsde görkezmek.
+        function setActiveWallet(wallet) {
+            activeWallet = wallet;
+
+            document.getElementById("wallet-address").value =
+                wallet.address;
+
+            document.getElementById("wallet-public-key").value =
+                wallet.public_key;
+
+            walletAddressDisplay.textContent = wallet.address;
+
+            exportButton.disabled = false;
+            registerButton.disabled = false;
+
+            setWalletStatus("Wallet successfully unlocked.");
+        }
+
+
+        // Täze gapjyk döretmek.
+        createButton.addEventListener("click", async function() {
+            const password = walletPassword.value;
+            const confirmation = walletPasswordConfirm.value;
+
+            if (password.length < 12) {
+                alert("Wallet password must contain at least 12 characters.");
+                return;
+            }
+
+            if (password !== confirmation) {
+                alert("Wallet passwords do not match.");
+                return;
+            }
+
+            createButton.disabled = true;
+            importButton.disabled = true;
+
+            setWalletStatus("Creating wallet...");
+
+            try {
+                const createdWallet = await createTMCWallet(password);
+
+                const unlockedWallet = await unlockTMCWallet(
+                    createdWallet.address,
+                    password
+                );
+
+                setActiveWallet(unlockedWallet);
+
+                setWalletStatus(
+                    "Wallet created. Export a backup before continuing."
+                );
+
+                alert("TMC wallet successfully created.");
+
+            } catch (error) {
+                console.error("Wallet creation error:", error);
+
+                setWalletStatus("Wallet creation failed.");
+
+                alert("Wallet creation failed: " + error.message);
+
+            } finally {
+                createButton.disabled = false;
+                importButton.disabled = false;
+            }
+        });
+
+
+        // Ätiýaçlyk nusgasyndan gapjyk import etmek.
+        importButton.addEventListener("click", function() {
+            if (walletPassword.value.length < 12) {
+                alert("Enter your wallet password first.");
+                return;
+            }
+
+            backupFile.click();
+        });
+
+
+        // Saýlanan faýldan gapjygy dikeltmek.
+        backupFile.addEventListener("change", async function() {
+            const file = backupFile.files[0];
+
+            if (!file) {
+                return;
+            }
+
+            createButton.disabled = true;
+            importButton.disabled = true;
+
+            setWalletStatus("Importing wallet...");
+
+            try {
+                const password = walletPassword.value;
+
+                const importedWallet = await importTMCWallet(
+                    file,
+                    password
+                );
+
+                const unlockedWallet = await unlockTMCWallet(
+                    importedWallet.address,
+                    password
+                );
+
+                setActiveWallet(unlockedWallet);
+
+                setWalletStatus(
+                    "Wallet successfully imported and unlocked."
+                );
+
+                alert("Wallet successfully restored.");
+
+            } catch (error) {
+                console.error("Wallet import error:", error);
+
+                setWalletStatus("Wallet import failed.");
+
+                alert("Wallet import failed: " + error.message);
+
+            } finally {
+                createButton.disabled = false;
+                importButton.disabled = false;
+                backupFile.value = "";
+            }
+        });
+
+
+        // Ätiýaçlyk nusgasyny eksport etmek.
+        exportButton.addEventListener("click", async function() {
+            if (!activeWallet) {
+                return;
+            }
+
+            try {
+                await exportTMCWallet(activeWallet.address);
+
+                setWalletStatus("Wallet backup exported.");
+
+            } catch (error) {
+                console.error("Wallet export error:", error);
+
+                alert("Wallet export failed: " + error.message);
+            }
+        });
+
+
+        // TMC hasaba alyş tranzaksiýasyna gol çekmek.
+        registrationForm.addEventListener("submit", async function(event) {
+            event.preventDefault();
+
+            if (!activeWallet) {
+                alert("Create or import a wallet first.");
+                return;
+            }
+
+            registerButton.disabled = true;
+
+            setWalletStatus("Signing registration transaction...");
+
+            try {
+                const signedTransaction = await signWalletRegistration(
+                    activeWallet
+                );
+
+                document.getElementById("wallet-address").value =
+                    activeWallet.address;
+
+                document.getElementById("wallet-public-key").value =
+                    activeWallet.public_key;
+
+                document.getElementById("wallet-transaction").value =
+                    JSON.stringify(signedTransaction);
+
+                setWalletStatus("Sending registration transaction...");
+
+                HTMLFormElement.prototype.submit.call(registrationForm);
+
+            } catch (error) {
+                console.error("Registration error:", error);
+
+                setWalletStatus("Registration failed.");
+
+                alert("Registration failed: " + error.message);
+
+                registerButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

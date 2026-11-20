@@ -1,4 +1,3 @@
-
 const TMC_REGISTER_DOMAIN = new TextEncoder().encode(
     "TMC-REGISTER-V1\u0000"
 );
@@ -131,11 +130,10 @@ async function encryptPrivateKey(privateKeyBytes, password) {
     };
 }
 
-
-// Şifrlenen gapjygy IndexedDB-de saklamak.
-function saveEncryptedWallet(wallet) {
+// TMC gapjygyny maglumatlar bazasyny açmak.
+function openTMCWalletDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("TMCWalletDB", 1);
+        const request = indexedDB.open("TMCWalletDB", 2);
 
         request.onupgradeneeded = () => {
             const db = request.result;
@@ -147,27 +145,36 @@ function saveEncryptedWallet(wallet) {
             }
         };
 
-        request.onerror = () => reject(request.error);
-
         request.onsuccess = () => {
-            const db = request.result;
+            resolve(request.result);
+        };
 
-            const transaction = db.transaction(
-                "wallets",
-                "readwrite"
-            );
+        request.onerror = () => {
+            reject(request.error);
+        };
+    });
+}
+async function saveEncryptedWallet(wallet) {
+    const db = await openTMCWalletDB();
 
-            transaction.objectStore("wallets").put(wallet);
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction("wallets", "readwrite");
 
-            transaction.oncomplete = () => {
-                db.close();
-                resolve();
-            };
+        transaction.objectStore("wallets").put(wallet);
 
-            transaction.onerror = () => {
-                db.close();
-                reject(transaction.error);
-            };
+        transaction.oncomplete = () => {
+            db.close();
+            resolve();
+        };
+
+        transaction.onerror = () => {
+            db.close();
+            reject(transaction.error);
+        };
+
+        transaction.onabort = () => {
+            db.close();
+            reject(transaction.error);
         };
     });
 }
@@ -294,42 +301,35 @@ function fromBase64(value) {
     );
 }
 
+// Şifrlenen gapjygy salgysy boýunça tapmak.
+async function getEncryptedWallet(address) {
+    const db = await openTMCWalletDB();
 
-// IndexedDB-den öň döredilen gapjygy almak.
-function getEncryptedWallet(address) {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("TMCWalletDB", 1);
+        const transaction = db.transaction("wallets", "readonly");
 
-        request.onerror = () => reject(request.error);
+        const request = transaction
+            .objectStore("wallets")
+            .get(address);
 
         request.onsuccess = () => {
-            const db = request.result;
+            resolve(request.result || null);
+        };
 
-            if (!db.objectStoreNames.contains("wallets")) {
-                db.close();
-                resolve(null);
-                return;
-            }
+        request.onerror = () => {
+            reject(request.error);
+        };
 
-            const transaction = db.transaction(
-                "wallets",
-                "readonly"
-            );
+        transaction.oncomplete = () => {
+            db.close();
+        };
 
-            const getRequest = transaction
-                .objectStore("wallets")
-                .get(address);
+        transaction.onerror = () => {
+            db.close();
+        };
 
-            getRequest.onsuccess = () => {
-                const wallet = getRequest.result || null;
-                db.close();
-                resolve(wallet);
-            };
-
-            getRequest.onerror = () => {
-                db.close();
-                reject(getRequest.error);
-            };
+        transaction.onabort = () => {
+            db.close();
         };
     });
 }
@@ -654,21 +654,12 @@ async function unlockWalletFromBackup(wallet, password) {
     };
 }
 
-
-// Import edilen gapjygy IndexedDB-de saklamak.
+// Dikeldilen gapjygy maglumatlar bazasynda saklamak.
 async function saveImportedWallet(wallet) {
-    const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open("TMCWalletDB", 1);
-
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
+    const db = await openTMCWalletDB();
 
     return new Promise((resolve, reject) => {
-        const transaction = db.transaction(
-            "wallets",
-            "readwrite"
-        );
+        const transaction = db.transaction("wallets", "readwrite");
 
         transaction.objectStore("wallets").put(wallet);
 

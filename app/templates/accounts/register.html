@@ -1,3 +1,4 @@
+
 {% load static %}
 <!DOCTYPE html>
 <html lang="en">
@@ -9,89 +10,25 @@
 <body>
     <h1>Create TMC Account</h1>
 
-    <form method="POST" id="registration-form">
+    {% if form.errors %}
+        <div>
+            {{ form.errors }}
+        </div>
+    {% endif %}
+
+    <form method="POST">
         {% csrf_token %}
 
         {{ form.as_p }}
 
-        <hr>
-
-        <h2>Create TMC Wallet</h2>
-
-        <p>
-            This password encrypts your wallet's private key locally
-            in your browser. It is different from your account password.
-        </p>
-
-        <label for="wallet-password">Wallet password:</label>
-        <input
-            type="password"
-            id="wallet-password"
-            minlength="12"
-            required
-        >
-
-        <br><br>
-
-        <label for="wallet-password-confirm">Confirm wallet password:</label>
-        <input
-            type="password"
-            id="wallet-password-confirm"
-            minlength="12"
-            required
-        >
-
-        <input type="hidden" name="wallet_address" id="wallet-address">
-        <input type="hidden" name="wallet_public_key" id="wallet-public-key">
-        <input type="hidden" name="wallet_transaction" id="wallet-transaction">
-
-        <br><br>
-
-        <button type="submit" id="register-button">Register</button>
+        <button type="submit">
+            Register
+        </button>
     </form>
 
-    <p>Already have an account? <a href="{% url 'login' %}">Login</a></p>
-
-    <script src="{% static 'accounts/js/tmc_wallet.js' %}"></script>
-
-    <script>
-        const registrationForm = document.getElementById("registration-form");
-        const registerButton = document.getElementById("register-button");
-
-        registrationForm.addEventListener("submit", async function(event) {
-            event.preventDefault();
-
-            const password = document.getElementById("wallet-password").value;
-            const confirmation = document.getElementById("wallet-password-confirm").value;
-
-            if (password.length < 12) {
-                alert("Wallet password must contain at least 12 characters.");
-                return;
-            }
-
-            if (password !== confirmation) {
-                alert("Wallet passwords do not match.");
-                return;
-            }
-
-            registerButton.disabled = true;
-
-            try {
-                const wallet = await createTMCWallet(password);
-
-                document.getElementById("wallet-address").value = wallet.address;
-                document.getElementById("wallet-public-key").value = wallet.public_key;
-                document.getElementById("wallet-transaction").value =
-                    JSON.stringify(wallet.transaction);
-
-                registrationForm.submit();
-
-            } catch (error) {
-                console.error("TMC wallet creation error:", error);
-                alert("Wallet creation failed: " + error.message);
-                registerButton.disabled = false;
-            }
-        });
-    </script>
+    <p>
+        Already have an account?
+        <a href="{% url 'login' %}">Login</a>
+    </p>
 </body>
 </html>
