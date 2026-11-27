@@ -4,16 +4,24 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-
+from decimal import Decimal
+from tmc_constants import TMC_UNIT
 from .forms import RegistrationForm
 
 import json
 import re
 
-from django.db import IntegrityError, transaction
+import base64
+from io import BytesIO
 
+import qrcode
+from qrcode.image.svg import SvgPathImage
+
+from wallet.blockchain_service import (
+    register_signed_wallet_on_blockchain,
+    sync_wallet_registration,
+)
 from wallet.models import Wallet
-from wallet.blockchain_service import register_signed_wallet_on_blockchain
 
 from tmc_transaction import (
     verify_transaction,
@@ -74,6 +82,28 @@ def dashboard_view(request):
         "accounts/dashboard.html",
     )
 
+# Gapjygyň salgysy üçin QR-kod döredýäris.
+def generate_wallet_qr(address):
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=6,
+        border=4,
+    )
+
+    qr.add_data(address)
+    qr.make(fit=True)
+
+    image = qr.make_image(image_factory=SvgPathImage)
+
+    buffer = BytesIO()
+    image.save(buffer)
+
+    encoded_image = base64.b64encode(
+        buffer.getvalue()
+    ).decode("ascii")
+
+    return f"data:image/svg+xml;base64,{encoded_image}"
 
 @login_required
 def wallet_view(request):
@@ -227,12 +257,48 @@ def wallet_view(request):
 
         return redirect("wallet")
 
-    # Ulanyjynyň gapjyk maglumatlaryny görkezýäris.
+    # Ulanyjynyň gapjyk maglumatlaryny alýarys.
     wallet = Wallet.objects.filter(user=request.user).first()
+
+    wallet_balance_minor = None
+    wallet_nonce = None
+    wallet_qr_code = None
+    network_error = None
+
+    if wallet and wallet.address:
+        # Açyk gapjyk salgysy üçin QR-kod döredýäris.
+        wallet_qr_code = generate_wallet_qr(wallet.address)
+
+        try:
+            # Gapjygyň blokçeýndäki ýagdaýyny barlaýarys.
+            account = sync_wallet_registration(wallet)
+
+            if account is not None:
+                wallet_balance_minor = account.get("balance_minor")
+                wallet_nonce = account.get("nonce")
+
+        except TMCClientError:
+            network_error = (
+                "TMC toruna birikmek başartmady. "
+                "Balansy täzeden ýüklemek üçin soňra synanyşyň."
+            )
+    wallet_balance_display = None
+
+    if wallet_balance_minor is not None:
+        wallet_balance_display = (
+            Decimal(wallet_balance_minor) / Decimal(TMC_UNIT)
+        ).quantize(Decimal("0.00"))
 
     return render(
         request,
         "accounts/wallet.html",
-        {"wallet": wallet},
+        {
+            "wallet": wallet,
+            "wallet_balance_minor": wallet_balance_minor,
+            "wallet_nonce": wallet_nonce,
+            "wallet_qr_code": wallet_qr_code,
+            "network_error": network_error,
+            "wallet_balance_display": wallet_balance_display,
+        },
     )
 

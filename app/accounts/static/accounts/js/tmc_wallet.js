@@ -421,6 +421,17 @@ async function unlockTMCWallet(address, password) {
 
     const publicKeyBytes = fromHex(wallet.public_key);
 
+    if (publicKeyBytes.length !== 32) {
+        throw new Error("Invalid Ed25519 public key.");
+    }
+
+    // Salgynyň açyk açara gabat gelýändigini barlamak.
+    const expectedAddress = await createTMCAddress(publicKeyBytes);
+
+    if (expectedAddress !== wallet.address) {
+        throw new Error("Wallet address does not match public key.");
+    }
+
     const publicKey = await crypto.subtle.importKey(
         "raw",
         publicKeyBytes,
@@ -546,7 +557,9 @@ async function exportTMCWallet(address) {
     link.click();
     link.remove();
 
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+        URL.revokeObjectURL(url);
+    }, 1000);
 
     return true;
 }
@@ -617,6 +630,17 @@ async function unlockWalletFromBackup(wallet, password) {
     );
 
     const publicKeyBytes = fromHex(wallet.public_key);
+
+    if (publicKeyBytes.length !== 32) {
+        throw new Error("Invalid Ed25519 public key.");
+    }
+
+    // Salgynyň açyk açardan dogry döredilendigini barlamak.
+    const expectedAddress = await createTMCAddress(publicKeyBytes);
+
+    if (expectedAddress !== wallet.address) {
+        throw new Error("Wallet address does not match public key.");
+    }
 
     const publicKey = await crypto.subtle.importKey(
         "raw",
